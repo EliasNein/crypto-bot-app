@@ -19,7 +19,12 @@ frontend/   Statisches HTML/CSS/JS ohne Build-Prozess
 data/       Beispiel-JSON-Dateien für die lokale Entwicklung
 ```
 
-## Backend lokal starten
+## Starten (Backend + Frontend in einem Prozess)
+
+Die FastAPI-Instanz liefert beides aus: die API-Endpunkte **und** das
+Frontend (`frontend/` ist unter `/` gemountet). Es wird also nur ein
+Prozess auf einem Port gebraucht, kein separater Webserver für die
+statischen Dateien.
 
 ```bash
 cd backend
@@ -34,8 +39,13 @@ copy .env.example .env        # Windows
 # dann DASHBOARD_TOKEN in .env auf einen eigenen Wert setzen,
 # z.B. erzeugt mit: openssl rand -hex 32
 
-uvicorn app.main:app --reload --port 8123
+uvicorn app.main:app --reload --port 8000
 ```
+
+Dann `http://localhost:8000/` im Browser öffnen - das ist das Dashboard.
+Beim ersten Laden nach dem Token fragen lassen (das aus der `.env`); das
+Feld "Backend-URL" bleibt dabei **leer**, weil API und Frontend von
+derselben Adresse kommen.
 
 Ohne `DATA_DIR`-Angabe liest das Backend automatisch aus `../data`
 (die mitgelieferten Beispieldateien). Für den echten Server: `DATA_DIR`
@@ -64,22 +74,16 @@ cd backend
 pytest
 ```
 
-## Frontend lokal starten
+## Frontend
 
-Kein Build-Schritt nötig. Beliebigen statischen Server im `frontend/`-Ordner
-starten, z.B.:
+Kein Build-Schritt, kein eigener Server - `frontend/` wird von der
+FastAPI-Instanz direkt mit ausgeliefert (siehe oben).
 
-```bash
-cd frontend
-python -m http.server 5500
-```
-
-Dann `http://localhost:5500` im Browser öffnen. Beim ersten Laden nach
-Token fragen lassen - das Token aus der Backend-`.env` eingeben. Läuft das
-Backend nicht auf derselben Adresse wie das Frontend, zusätzlich die
-Backend-URL angeben (z.B. `http://localhost:8123`). Beides wird im
-LocalStorage des Browsers gespeichert; über das Zahnrad-Icon oben rechts
-lässt es sich später ändern.
+Token und (optionale) Backend-URL werden im LocalStorage des Browsers
+gespeichert; über das Zahnrad-Icon oben rechts lassen sie sich später
+ändern. Die Backend-URL wird nur gebraucht, wenn das Frontend doch einmal
+von einer anderen Adresse aus läuft als die API - dafür bleibt das
+CORS-Setup (`CORS_ORIGINS`) erhalten.
 
 Das Dashboard aktualisiert sich automatisch alle 45 Sekunden und zeigt bei
 falschem Token oder nicht erreichbarem Backend eine klare Fehlermeldung.
@@ -96,13 +100,12 @@ Cloudflare Tunnel).
 
 ## Später auf dem Homeserver
 
-1. Backend mit echtem `DASHBOARD_TOKEN` und `DATA_DIR` (Pfad zum
+1. Den einen Prozess mit echtem `DASHBOARD_TOKEN` und `DATA_DIR` (Pfad zum
    `data/`-Ordner des Bots) starten, z.B. via systemd-Service oder
-   `pm2`/`supervisor`.
-2. Frontend-Ordner von einem beliebigen Webserver ausliefern (nginx,
-   Caddy, oder einfach `python -m http.server`).
-3. Cloudflare Tunnel auf den Port des Frontends (und ggf. separat auf das
-   Backend, falls Frontend und Backend nicht denselben Host/Port teilen)
-   zeigen lassen.
-4. `CORS_ORIGINS` in der Backend-`.env` auf die tatsächliche Frontend-URL
-   einschränken, sobald die feststeht (statt `*`).
+   `pm2`/`supervisor`. Er liefert API und Frontend gemeinsam aus - ein
+   zweiter Webserver für die statischen Dateien ist nicht nötig.
+2. Cloudflare Tunnel auf genau diesen einen Port zeigen lassen.
+3. `CORS_ORIGINS` kann auf `*` bleiben, solange alles über dieselbe
+   Adresse läuft (der Browser schickt dann gar keine CORS-Anfragen). Nur
+   falls das Frontend doch von einer anderen Domain aus genutzt wird,
+   dort die konkrete URL eintragen.
