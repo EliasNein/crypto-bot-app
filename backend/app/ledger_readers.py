@@ -59,6 +59,35 @@ def _num(value: Any, default: float | None = 0.0) -> float | None:
         return default
 
 
+def _int_or(value: Any, default: int) -> int:
+    """Ganzzahl aus einem Ledger-Feld, sonst `default`.
+
+    Wird für Sortier-Schlüssel gebraucht: ein Feld, das entgegen dem
+    Schema einen String enthält, würde beim Vergleich mit einer Zahl
+    sonst TypeError werfen und den ganzen Endpunkt auf 500 ziehen -
+    also auch die Anzeige der drei Bots, mit denen alles in Ordnung ist.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _realized_pnl_sum(closed_records: list[dict]) -> float | None:
+    """Summe der realisierten PnL über geschlossene, ECHTE Positionen.
+
+    Dry-Run-Einträge bleiben draußen - sonst stünde ein simulierter
+    Gewinn in der Bot-Karte direkt neben dem echten in der
+    Gesamtgewinn-Kachel (die schon immer filtert), und beide Zahlen auf
+    demselben Bildschirm widersprächen sich.
+    """
+    values = [
+        _num(r.get("realized_pnl"), default=None) for r in closed_records if r.get("dry_run") is False
+    ]
+    values = [v for v in values if v is not None]
+    return sum(values) if values else None
+
+
 def _latest(values: list[Any]) -> str | None:
     """Größter (= jüngster) ISO-Zeitstempel-String aus einer Liste, None wenn leer.
 
@@ -134,9 +163,7 @@ def summarize_grid(path: Path) -> dict:
     open_records = [r for r in records if r.get("status") == "open"]
     closed_records = [r for r in records if r.get("status") != "open"]
 
-    realized_pnl_values = [_num(r.get("realized_pnl"), default=None) for r in closed_records]
-    realized_pnl_values = [v for v in realized_pnl_values if v is not None]
-    realized_pnl = sum(realized_pnl_values) if realized_pnl_values else None
+    realized_pnl = _realized_pnl_sum(closed_records)
 
     open_positions = [
         {
@@ -149,7 +176,7 @@ def summarize_grid(path: Path) -> dict:
             "bought_at": r.get("bought_at"),
             "dry_run": r.get("dry_run"),
         }
-        for r in sorted(open_records, key=lambda r: r.get("level_index") if r.get("level_index") is not None else -1)
+        for r in sorted(open_records, key=lambda r: _int_or(r.get("level_index"), -1))
     ]
 
     return {
@@ -174,9 +201,7 @@ def summarize_trend(path: Path) -> dict:
     open_records = [r for r in records if r.get("status") == "open"]
     closed_records = [r for r in records if r.get("status") != "open"]
 
-    realized_pnl_values = [_num(r.get("realized_pnl"), default=None) for r in closed_records]
-    realized_pnl_values = [v for v in realized_pnl_values if v is not None]
-    realized_pnl = sum(realized_pnl_values) if realized_pnl_values else None
+    realized_pnl = _realized_pnl_sum(closed_records)
 
     open_positions = [
         {

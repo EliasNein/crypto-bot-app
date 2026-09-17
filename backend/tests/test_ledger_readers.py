@@ -392,3 +392,52 @@ def test_overview_ignores_open_positions_for_realized_pnl(tmp_path):
     assert result["gesamtverlust"] == pytest.approx(0.0)
     # Die offene, echte Position zählt stattdessen zum unrealisierten Bestand.
     assert result["unrealisiert_geschätzt"]["grid"] == {"quantity": 1.0, "avg_price": 100.0}
+
+
+# --- Dry-Run darf nie in eine Geldsumme einfließen -------------------------
+
+
+def test_grid_card_realized_pnl_excludes_dry_run(tmp_path):
+    """Die Bot-Karte muss dieselbe Regel anwenden wie die
+    Gesamtgewinn-Kachel - sonst stehen zwei widersprüchliche Beträge
+    gleichzeitig auf dem Bildschirm."""
+    path = tmp_path / "grid_positions.json"
+    _write(path, [_grid_closed(realized_pnl=5.0, dry_run=False), _grid_closed(realized_pnl=1000.0, dry_run=True)])
+
+    result = summarize_grid(path)
+
+    assert result["metrics"]["realized_pnl"] == pytest.approx(5.0)
+
+
+def test_trend_card_realized_pnl_excludes_dry_run(tmp_path):
+    path = tmp_path / "trend_ledger.json"
+    _write(path, [_trend_closed(realized_pnl=-2.0, dry_run=False), _trend_closed(realized_pnl=-500.0, dry_run=True)])
+
+    result = summarize_trend(path)
+
+    assert result["metrics"]["realized_pnl"] == pytest.approx(-2.0)
+
+
+def test_card_and_overview_agree_on_the_same_ledger(tmp_path):
+    """Regressionsschutz für den eigentlichen Befund: Karte und Kachel
+    dürfen bei identischer Datenlage nicht auseinanderlaufen."""
+    dca_path = tmp_path / "trade_ledger.json"
+    grid_path = tmp_path / "grid_positions.json"
+    trend_path = tmp_path / "trend_ledger.json"
+    _write(dca_path, [])
+    _write(trend_path, [])
+    _write(grid_path, [_grid_closed(realized_pnl=5.0, dry_run=False), _grid_closed(realized_pnl=1000.0, dry_run=True)])
+
+    karte = summarize_grid(grid_path)["metrics"]["realized_pnl"]
+    kachel = summarize_overview(dca_path, grid_path, trend_path)["gesamtgewinn"]
+
+    assert karte == pytest.approx(kachel)
+
+
+def test_dry_run_only_closed_positions_yield_no_realized_pnl(tmp_path):
+    """Nur simulierte Abschlüsse: die Karte darf keinen Gewinn zeigen,
+    nicht 0.0 und erst recht nicht den simulierten Betrag."""
+    path = tmp_path / "grid_positions.json"
+    _write(path, [_grid_closed(realized_pnl=42.0, dry_run=True)])
+
+    assert summarize_grid(path)["metrics"]["realized_pnl"] is None

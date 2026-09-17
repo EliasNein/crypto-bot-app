@@ -63,9 +63,9 @@
     return `${base}/api/status`;
   }
 
-  function exportUrl(token, period) {
+  function exportUrl(period) {
     const base = getApiBase().replace(/\/+$/, "");
-    return `${base}/api/export/trades?token=${encodeURIComponent(token)}&period=${encodeURIComponent(period)}`;
+    return `${base}/api/export/trades?period=${encodeURIComponent(period)}`;
   }
 
   function showOverlay(prefill) {
@@ -405,14 +405,54 @@
     showOverlay(true);
   });
 
-  els.exportBtn.addEventListener("click", () => {
+  // Der Download läuft bewusst über fetch + Blob statt über eine
+  // Navigation zur Export-URL: Das Token geht so im Header raus und
+  // landet nicht in der Browser-History, im Server-Access-Log oder in
+  // den Logs des Cloudflare Tunnels.
+  async function downloadExport() {
     const token = getToken();
     if (!token) {
       showOverlay(true);
       return;
     }
-    window.location.href = exportUrl(token, els.exportPeriod.value);
-  });
+
+    els.exportBtn.disabled = true;
+    try {
+      const response = await fetch(exportUrl(els.exportPeriod.value), {
+        headers: { "X-Dashboard-Token": token },
+      });
+
+      if (response.status === 401) {
+        clearToken();
+        showOverlay(true);
+        showLoginError("Token ungültig oder abgelaufen. Bitte erneut eingeben.");
+        return;
+      }
+
+      if (!response.ok) {
+        showErrorBanner(`Export fehlgeschlagen (Status ${response.status}).`);
+        return;
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = "trades_export.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // Erst freigeben, wenn der Browser den Download übernommen hat.
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      hideErrorBanner();
+    } catch {
+      showErrorBanner("Export nicht möglich - Backend nicht erreichbar.");
+    } finally {
+      els.exportBtn.disabled = false;
+    }
+  }
+
+  els.exportBtn.addEventListener("click", downloadExport);
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && getToken()) {

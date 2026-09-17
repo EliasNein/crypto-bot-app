@@ -29,9 +29,23 @@ from .ledger_readers import (
 
 load_dotenv()
 
-app = FastAPI(title="Trading Bot Dashboard API")
+# Die interaktive API-Doku ist abgeschaltet: sie wäre ohne Token öffentlich
+# erreichbar und würde die komplette API-Struktur preisgeben. Für ein
+# privates Dashboard hinter einem Cloudflare Tunnel gibt es dafür keinen
+# Grund - das Schema ist in diesem Repo nachlesbar.
+app = FastAPI(
+    title="Trading Bot Dashboard API",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
-_cors_origins = os.getenv("CORS_ORIGINS", "*")
+# Default ist bewusst LEER, nicht "*": Frontend und API kommen seit dem
+# StaticFiles-Mount von derselben Adresse, dabei stellt der Browser gar
+# keine CORS-Anfragen. Eine offene Erlaubnis wäre also reine
+# Angriffsfläche. Nur wer das Frontend bewusst von einer anderen Domain
+# aus betreibt, trägt diese hier ein.
+_cors_origins = os.getenv("CORS_ORIGINS", "")
 _origins = ["*"] if _cors_origins.strip() == "*" else [o.strip() for o in _cors_origins.split(",") if o.strip()]
 
 app.add_middleware(
