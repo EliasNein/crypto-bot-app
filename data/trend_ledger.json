@@ -1,0 +1,16 @@
+[
+  {
+    "id": "51811968-e5a0-4452-bb93-39743e79e435",
+    "entry_price": 76901.56,
+    "entry_time": "2026-09-10T12:59:49.484865+00:00",
+    "quantity": 0.0001950545606617083,
+    "quote_spent": 15.0,
+    "dry_run": true,
+    "status": "open",
+    "exit_price": null,
+    "exit_time": null,
+    "exit_reason": null,
+    "realized_pnl": null,
+    "stop_loss_order_id": null
+  }
+]
