@@ -7,15 +7,19 @@ from app.main import app
 
 client = TestClient(app)
 
+# 64 Hex-Zeichen wie aus `openssl rand -hex 32` - kürzere Tokens weist
+# der Entropie-Check in auth.py ab.
+VALID_TOKEN = "a" * 64
+
 
 @pytest.fixture(autouse=True)
 def dashboard_token(monkeypatch):
-    monkeypatch.setenv("DASHBOARD_TOKEN", "secret-token")
+    monkeypatch.setenv("DASHBOARD_TOKEN", VALID_TOKEN)
     yield
 
 
 def _auth_get(path="/api/status"):
-    return client.get(path, headers={"X-Dashboard-Token": "secret-token"})
+    return client.get(path, headers={"X-Dashboard-Token": VALID_TOKEN})
 
 
 def test_status_aggregates_all_four_bots(tmp_path, monkeypatch):

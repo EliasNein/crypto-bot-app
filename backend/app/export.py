@@ -169,13 +169,28 @@ def _period_range(period: str, now: datetime) -> tuple[datetime | None, datetime
     raise ValueError(f"Ungültiger period-Wert '{period}'. Erlaubt: {', '.join(VALID_PERIODS)}.")
 
 
-def _parse_iso(ts: str | None) -> datetime | None:
+def _parse_iso(ts: Any) -> datetime | None:
+    """Zeitstempel aus dem Ledger, oder None wenn er nicht auswertbar ist.
+
+    Fängt auch TypeError: steht im Ledger entgegen dem Schema eine Zahl
+    statt eines ISO-Strings, wirft fromisoformat TypeError statt
+    ValueError - ungefangen würde das den Export auf 500 ziehen.
+    """
     if not ts:
         return None
     try:
         return datetime.fromisoformat(ts)
-    except ValueError:
+    except (ValueError, TypeError):
         return None
+
+
+def _sort_key(ts: Any) -> str:
+    """Sortier-Schlüssel, der garantiert ein String ist.
+
+    Ein nicht-stringiger Zeitstempel im Ledger würde beim Vergleich mit
+    den übrigen Zeilen sonst TypeError werfen (str vs. int).
+    """
+    return ts if isinstance(ts, str) else ""
 
 
 def _row_in_range(row: list[Any], start: datetime | None, end: datetime) -> bool:
@@ -243,7 +258,7 @@ def build_trades_csv(
 
     rows = _dca_rows(dca_records) + _grid_rows(grid_records) + _trend_rows(trend_records)
     rows = [row for row in rows if _row_in_range(row, start, end)]
-    rows.sort(key=lambda row: row[0] or "")
+    rows.sort(key=lambda row: _sort_key(row[0]))
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)

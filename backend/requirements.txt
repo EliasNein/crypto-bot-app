@@ -1,8 +1,10 @@
-fastapi>=0.111
-uvicorn[standard]>=0.30
-pydantic>=2.7
-python-dotenv>=1.0
+# Exakt gepinnt, damit der Homeserver dieselben Versionen bekommt wie
+# lokal getestet. Zum Aktualisieren bewusst hochsetzen, nicht automatisch.
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+pydantic==2.13.5
+python-dotenv==1.2.3
 
 # Tests
-pytest>=8.0
-httpx>=0.27
+pytest==9.1.1
+httpx==0.28.1
