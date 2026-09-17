@@ -1,0 +1,58 @@
+[
+  {
+    "id": "7d57fdd8-740b-4555-8753-03d23b8fe855",
+    "level_index": 4,
+    "buy_price": 77612.18,
+    "target_sell_price": 77720.43910371671,
+    "quantity": 0.0001932686338664885,
+    "quote_spent": 15.0,
+    "bought_at": "2026-09-10T12:31:25.182272+00:00",
+    "dry_run": true,
+    "status": "open",
+    "sell_price": null,
+    "sold_at": null,
+    "realized_pnl": null
+  },
+  {
+    "id": "90fd9226-7a3d-4d02-81f7-5f50fa8d6651",
+    "level_index": 2,
+    "buy_price": 77470.97,
+    "target_sell_price": 77565.23107633299,
+    "quantity": 0.00019362091374356096,
+    "quote_spent": 15.0,
+    "bought_at": "2026-09-10T12:33:26.160195+00:00",
+    "dry_run": true,
+    "status": "open",
+    "sell_price": null,
+    "sold_at": null,
+    "realized_pnl": null
+  },
+  {
+    "id": "93fcffd7-8736-4130-b89e-f6115cf5d72d",
+    "level_index": 0,
+    "buy_price": 77289.66,
+    "target_sell_price": 77410.333,
+    "quantity": 0.00019407511949205106,
+    "quote_spent": 15.0,
+    "bought_at": "2026-09-10T12:37:27.591431+00:00",
+    "dry_run": true,
+    "status": "open",
+    "sell_price": null,
+    "sold_at": null,
+    "realized_pnl": null
+  },
+  {
+    "id": "3c1f4b2a-1111-4a22-9a33-abcdef012345",
+    "level_index": 1,
+    "buy_price": 76980.4,
+    "target_sell_price": 77135.15,
+    "quantity": 0.00019483,
+    "quote_spent": 15.0,
+    "bought_at": "2026-09-08T06:12:09.001000+00:00",
+    "dry_run": false,
+    "status": "closed",
+    "sell_price": 77135.15,
+    "sold_at": "2026-09-11T14:02:55.412000+00:00",
+    "realized_pnl": 0.30
+  }
+]

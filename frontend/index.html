@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Trading Bot Dashboard</title>
+  <meta name="theme-color" content="#0b0d12" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>Trading Bot Dashboard</h1>
+    <button id="settings-btn" class="icon-btn" title="Einstellungen" aria-label="Einstellungen">⚙</button>
+  </header>
+
+  <div class="status-line">
+    <span id="conn-dot" class="dot"></span>
+    <span id="conn-text">Verbinde...</span>
+  </div>
+
+  <div id="error-banner"></div>
+
+  <section class="overview-tiles" id="overview-tiles"></section>
+  <section class="unrealized-block" id="unrealized-block"></section>
+
+  <main class="cards" id="cards"></main>
+
+  <div id="login-overlay">
+    <div class="login-box">
+      <h2>Zugang zum Dashboard</h2>
+      <label for="input-token">Token</label>
+      <input id="input-token" type="password" autocomplete="off" placeholder="Dashboard-Token" />
+
+      <label for="input-base">Backend-URL (optional)</label>
+      <input id="input-base" type="text" autocomplete="off" placeholder="z.B. https://bot.example.com" />
+      <div class="hint">Leer lassen, wenn Frontend und Backend von derselben Adresse laufen.</div>
+
+      <div id="login-error" class="login-error"></div>
+      <button id="login-save">Speichern &amp; verbinden</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,373 @@
+:root {
+  --bg: #0b0d12;
+  --surface: #12151c;
+  --surface-2: #191d27;
+  --border: #262b38;
+  --text: #e6e9f0;
+  --text-dim: #8b93a7;
+  --accent: #3ddc97;
+  --danger: #ef5a5a;
+  --warn: #e8b34a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+  padding: 16px;
+  padding-bottom: 48px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+header h1 {
+  font-size: 1.15rem;
+  margin: 0;
+}
+
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.dot.ok { background: var(--accent); }
+.dot.error { background: var(--danger); }
+
+.icon-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  width: 38px;
+  height: 38px;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-btn:active {
+  background: var(--surface-2);
+}
+
+#error-banner {
+  background: rgba(239, 90, 90, 0.12);
+  border: 1px solid var(--danger);
+  color: #ffb4b4;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 14px;
+  font-size: 0.85rem;
+  display: none;
+}
+
+#error-banner.visible {
+  display: block;
+}
+
+.overview-tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.tile {
+  border-radius: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+}
+
+.tile .tile-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+}
+
+.tile .tile-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.tile.gain {
+  background: rgba(61, 220, 151, 0.1);
+  border-color: var(--accent);
+}
+
+.tile.gain .tile-value {
+  color: var(--accent);
+}
+
+.tile.loss {
+  background: rgba(239, 90, 90, 0.1);
+  border-color: var(--danger);
+}
+
+.tile.loss .tile-value {
+  color: var(--danger);
+}
+
+.unrealized-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.unrealized-block .unrealized-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.unrealized-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.unrealized-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+
+.unrealized-row .bot-name {
+  color: var(--text-dim);
+  min-width: 60px;
+}
+
+.unrealized-hint {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-top: 10px;
+  font-style: italic;
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.card-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge {
+  font-size: 0.68rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.badge.ok {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.badge.no_data {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.metrics-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.metric {
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.metric .label {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.metric .value {
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin-top: 2px;
+  word-break: break-word;
+}
+
+.value.pos { color: var(--accent); }
+.value.neg { color: var(--danger); }
+
+.positions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.position {
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.position .dry-run-tag {
+  font-size: 0.62rem;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  padding: 0 5px;
+  align-self: flex-start;
+}
+
+.last-activity {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-top: 10px;
+}
+
+.no-data-text {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+/* Login-Overlay */
+#login-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 20;
+}
+
+#login-overlay.hidden {
+  display: none;
+}
+
+.login-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  width: 100%;
+  max-width: 360px;
+}
+
+.login-box h2 {
+  margin-top: 0;
+  font-size: 1.05rem;
+}
+
+.login-box label {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin: 12px 0 4px;
+}
+
+.login-box input {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+}
+
+.login-box .hint {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+.login-box .login-error {
+  color: var(--danger);
+  font-size: 0.8rem;
+  margin-top: 10px;
+  display: none;
+}
+
+.login-box .login-error.visible {
+  display: block;
+}
+
+.login-box button {
+  width: 100%;
+  margin-top: 16px;
+  background: var(--accent);
+  color: #06110c;
+  border: none;
+  border-radius: 10px;
+  padding: 11px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.login-box button:active {
+  opacity: 0.85;
+}
