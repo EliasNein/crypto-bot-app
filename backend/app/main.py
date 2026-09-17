@@ -17,6 +17,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from . import access_log
 from .auth import verify_token
 from .export import build_trades_csv
 from .ledger_readers import (
@@ -28,6 +29,10 @@ from .ledger_readers import (
 )
 
 load_dotenv()
+
+# Verhindert, dass ein Token aus einem alten Bookmark/History-Eintrag
+# über den Query-String in den uvicorn-Access-Logs landet.
+access_log.install()
 
 # Die interaktive API-Doku ist abgeschaltet: sie wäre ohne Token öffentlich
 # erreichbar und würde die komplette API-Struktur preisgeben. Für ein
