@@ -18,6 +18,8 @@
     loginError: document.getElementById("login-error"),
     loginSave: document.getElementById("login-save"),
     settingsBtn: document.getElementById("settings-btn"),
+    exportBtn: document.getElementById("export-btn"),
+    exportPeriod: document.getElementById("export-period"),
   };
 
   let refreshTimer = null;
@@ -59,6 +61,11 @@
   function statusUrl() {
     const base = getApiBase().replace(/\/+$/, "");
     return `${base}/api/status`;
+  }
+
+  function exportUrl(token, period) {
+    const base = getApiBase().replace(/\/+$/, "");
+    return `${base}/api/export/trades?token=${encodeURIComponent(token)}&period=${encodeURIComponent(period)}`;
   }
 
   function showOverlay(prefill) {
@@ -396,6 +403,15 @@
 
   els.settingsBtn.addEventListener("click", () => {
     showOverlay(true);
+  });
+
+  els.exportBtn.addEventListener("click", () => {
+    const token = getToken();
+    if (!token) {
+      showOverlay(true);
+      return;
+    }
+    window.location.href = exportUrl(token, els.exportPeriod.value);
   });
 
   document.addEventListener("visibilitychange", () => {

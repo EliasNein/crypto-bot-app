@@ -13,10 +13,11 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import verify_token
+from .export import build_trades_csv
 from .ledger_readers import (
     summarize_allocator,
     summarize_dca,
@@ -57,6 +58,15 @@ def _data_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "data"
 
 
+def _ledger_paths() -> tuple[Path, Path, Path]:
+    data_dir = _data_dir()
+    return (
+        data_dir / "trade_ledger.json",
+        data_dir / "grid_positions.json",
+        data_dir / "trend_ledger.json",
+    )
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
@@ -64,14 +74,29 @@ def health() -> dict:
 
 @app.get("/api/status", dependencies=[Depends(verify_token)])
 def status() -> dict:
-    data_dir = _data_dir()
-    dca_path = data_dir / "trade_ledger.json"
-    grid_path = data_dir / "grid_positions.json"
-    trend_path = data_dir / "trend_ledger.json"
+    dca_path, grid_path, trend_path = _ledger_paths()
     return {
         "dca": summarize_dca(dca_path),
         "grid": summarize_grid(grid_path),
         "trend": summarize_trend(trend_path),
-        "allocator": summarize_allocator(data_dir / "allocator_state.json"),
+        "allocator": summarize_allocator(_data_dir() / "allocator_state.json"),
         "overview": summarize_overview(dca_path, grid_path, trend_path),
     }
+
+
+@app.get("/api/export/trades", dependencies=[Depends(verify_token)])
+def export_trades(period: str = Query(default="all")) -> Response:
+    """CSV-Export aller echten Trades - siehe export.py für die Regeln
+    (nur dry_run=false, Kauf/Verkauf-Zeilen, Kommentarblock am Ende,
+    optionale Zeitraum-Filterung über ?period=week|month|year|all).
+    """
+    dca_path, grid_path, trend_path = _ledger_paths()
+    try:
+        csv_content = build_trades_csv(dca_path, grid_path, trend_path, period=period)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=trades_export.csv"},
+    )

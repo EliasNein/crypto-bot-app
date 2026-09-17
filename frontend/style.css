@@ -92,6 +92,38 @@ header h1 {
   display: block;
 }
 
+.export-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.export-btn {
+  flex: 1;
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 10px;
+  padding: 11px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.export-btn:active {
+  background: var(--surface-2);
+}
+
+.export-row select {
+  flex: 0 0 92px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 0 8px;
+  font-size: 0.85rem;
+}
+
 .overview-tiles {
   display: grid;
   grid-template-columns: 1fr 1fr;
