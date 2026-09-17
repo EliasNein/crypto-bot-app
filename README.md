@@ -45,6 +45,17 @@ Endpunkte:
 - `GET /health` - kein Token nötig, liefert `{"status": "ok"}`.
 - `GET /api/status` - Token per Header `X-Dashboard-Token: <token>` oder
   Query-Parameter `?token=<token>`. Ohne/mit falschem Token: `401`.
+- `GET /api/export/trades` - CSV-Export aller ECHTEN Trades (`dry_run: false`)
+  aus allen drei Bots, chronologisch sortiert, als Download
+  (`Content-Disposition: attachment`). Gleiche Token-Authentifizierung wie
+  `/api/status`. Enthält am Ende einen `#`-Kommentarblock mit Hinweisen
+  (Beträge in USDT, keine Euro-Umrechnung, kein Steuerberatungs-Ersatz) -
+  gedacht als Rohdaten-Vorbereitung für einen Steuerberater, keine
+  fertige Steuerauswertung.
+  Optionaler Parameter `?period=week|month|year|all` (Default `all`)
+  filtert nach Kauf- bzw. Verkaufs-Zeitpunkt der jeweiligen Zeile - eine
+  Position, die vor dem Zeitraum eröffnet und erst darin verkauft wurde,
+  zeigt dann nur die Verkaufs-Zeile. Ein ungültiger Wert liefert `400`.
 
 ### Tests
 
@@ -72,6 +83,9 @@ lässt es sich später ändern.
 
 Das Dashboard aktualisiert sich automatisch alle 45 Sekunden und zeigt bei
 falschem Token oder nicht erreichbarem Backend eine klare Fehlermeldung.
+
+Der Button "Export für Steuerberater (CSV)" lädt `/api/export/trades`
+herunter (normaler Browser-Download, keine Vorschau im Frontend).
 
 ### "Zum Startbildschirm hinzufügen" (Android)
 
