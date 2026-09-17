@@ -15,6 +15,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .auth import verify_token
 from .export import build_trades_csv
@@ -100,3 +101,17 @@ def export_trades(period: str = Query(default="all")) -> Response:
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=trades_export.csv"},
     )
+
+
+# Das Frontend wird von derselben Instanz ausgeliefert wie die API - auf dem
+# Homeserver läuft damit genau ein Prozess auf einem Port, kein zweiter
+# Webserver für die statischen Dateien.
+#
+# Dieser Mount MUSS nach allen API-Routen stehen: Starlette prüft die Routen
+# in Registrierungsreihenfolge, ein Mount auf "/" würde sonst /health und
+# /api/... verschlucken.
+#
+# html=True liefert index.html automatisch als Startseite aus.
+_FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+
+app.mount("/", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")
