@@ -120,6 +120,11 @@ Was die App selbst durchsetzt:
 - **Fehlgeschlagene Zugriffe werden geloggt** (Pfad + Client-IP, hinter
   Cloudflare aus `CF-Connecting-IP`). Das übermittelte Token wird dabei
   nie mitgeloggt.
+- **Access-Logs werden gefiltert.** uvicorn loggt die angefragte URL
+  auch bei abgelehnten Requests - ein alter Bookmark mit `?token=...`
+  würde das Token sonst trotz `401` ins Log schreiben. Sensible
+  Parameterwerte werden deshalb durch `REDACTED` ersetzt
+  (`app/access_log.py`), harmlose wie `period=year` bleiben lesbar.
 - **Keine öffentliche API-Doku.** `/docs`, `/redoc` und `/openapi.json`
   sind abgeschaltet.
 - **CORS standardmäßig geschlossen** (siehe `CORS_ORIGINS`).
