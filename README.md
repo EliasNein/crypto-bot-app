@@ -77,6 +77,20 @@ cd backend
 pytest
 ```
 
+Zusätzlich gibt es Browser-Tests für den Login-/Reload-Ablauf des
+Frontends (`tests/test_frontend_login_flow.py`). Die brauchen Playwright
+und überspringen sich sonst automatisch:
+
+```bash
+pip install -r requirements-dev.txt
+python -m playwright install chromium
+pytest                      # führt die Browser-Tests jetzt mit aus
+```
+
+Sie starten einen echten uvicorn-Prozess und steuern einen echten
+Browser - die Sichtbarkeit des Login-Overlays hängt an einer CSS-Klasse
+und ist in einem DOM-Stub nicht zuverlässig prüfbar.
+
 ## Frontend
 
 Kein Build-Schritt, kein eigener Server - `frontend/` wird von der
