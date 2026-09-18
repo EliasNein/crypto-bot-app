@@ -1,0 +1,7 @@
+# Zusätzlich zu requirements.txt - nur für die Browser-Tests in
+# tests/test_frontend_login_flow.py. Ohne diese Pakete überspringen sich
+# genau diese Tests, der Rest der Suite läuft normal durch.
+#
+# Nach der Installation einmalig den Browser holen:
+#   python -m playwright install chromium
+playwright==1.63.0

@@ -382,6 +382,13 @@
   }
 
   function startPolling() {
+    // Das Overlay ist im HTML sichtbar angelegt (damit ohne JavaScript
+    // nicht einfach ein leeres Dashboard dasteht). Wer pollt, hat ein
+    // Token - dann muss es weg. Das gehört hierher und nicht in den
+    // Login-Handler: sonst bleibt es bei jedem anderen Einstieg stehen,
+    // etwa beim Neuladen mit bereits gespeichertem Token.
+    hideOverlay();
+
     if (refreshTimer) clearInterval(refreshTimer);
     fetchStatus();
     refreshTimer = setInterval(fetchStatus, REFRESH_INTERVAL_MS);
@@ -397,7 +404,6 @@
       return;
     }
     saveCredentials(token, base);
-    hideOverlay();
     startPolling();
   });
 
