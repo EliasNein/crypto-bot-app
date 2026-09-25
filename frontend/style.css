@@ -5,9 +5,25 @@
   --border: #262b38;
   --text: #e6e9f0;
   --text-dim: #8b93a7;
+
+  /* Farbe trägt Bedeutung, deshalb ist jede genau EINER zugeordnet:
+     Grün ausschließlich für Geld im Plus, Rot für Geld im Minus und
+     Fehler, Amber für Hinweise und Warnungen. Der Normalzustand
+     (verbunden, OK, Schaltflächen) bleibt bewusst farblos - wäre er
+     grün, hieße Grün nichts mehr. */
   --accent: #3ddc97;
   --danger: #ef5a5a;
   --warn: #e8b34a;
+
+  /* Typo-Skala: fünf Stufen statt der zuvor zwanzig Einzelwerte, die
+     sich teils um 0,02rem unterschieden - sichtbar war das nicht, aber
+     es verhinderte jeden Rhythmus. Neue Elemente nehmen eine dieser
+     Stufen, keinen eigenen Wert. */
+  --fs-xs: 0.72rem; /* Labels, Meta, Zeitangaben */
+  --fs-sm: 0.82rem; /* Nebentexte, Abschnittstitel, Fließtext */
+  --fs-md: 0.95rem; /* Kartentitel, Kennzahlen */
+  --fs-lg: 1.15rem; /* Seitentitel */
+  --fs-xl: 1.35rem; /* Hervorgehobene Beträge */
 }
 
 * {
@@ -37,7 +53,7 @@ header {
 }
 
 header h1 {
-  font-size: 1.15rem;
+  font-size: var(--fs-lg);
   margin: 0;
 }
 
@@ -45,10 +61,12 @@ header h1 {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   color: var(--text-dim);
 }
 
+/* Nur der Fehlerfall bekommt Farbe. Verbunden ist der Normalzustand -
+   den trägt der Text ("Verbunden · aktualisiert ..."). */
 .dot {
   width: 8px;
   height: 8px;
@@ -57,7 +75,6 @@ header h1 {
   flex-shrink: 0;
 }
 
-.dot.ok { background: var(--accent); }
 .dot.error { background: var(--danger); }
 
 .icon-btn {
@@ -67,7 +84,7 @@ header h1 {
   border-radius: 10px;
   width: 38px;
   height: 38px;
-  font-size: 1.1rem;
+  font-size: var(--fs-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -84,7 +101,7 @@ header h1 {
   padding: 10px 12px;
   border-radius: 10px;
   margin-bottom: 14px;
-  font-size: 0.85rem;
+  font-size: var(--fs-sm);
   display: none;
 }
 
@@ -98,15 +115,16 @@ header h1 {
   margin-bottom: 14px;
 }
 
+/* Neutral: eine Aktion, kein Geldbetrag. */
 .export-btn {
   flex: 1;
   display: block;
   background: var(--surface);
-  border: 1px solid var(--accent);
-  color: var(--accent);
+  border: 1px solid var(--border);
+  color: var(--text);
   border-radius: 10px;
   padding: 11px;
-  font-size: 0.85rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -121,7 +139,7 @@ header h1 {
   color: var(--text);
   border-radius: 10px;
   padding: 0 8px;
-  font-size: 0.85rem;
+  font-size: var(--fs-sm);
 }
 
 .overview-tiles {
@@ -138,14 +156,14 @@ header h1 {
 }
 
 .tile .tile-label {
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--text-dim);
 }
 
 .tile .tile-value {
-  font-size: 1.35rem;
+  font-size: var(--fs-xl);
   font-weight: 700;
   margin-top: 4px;
 }
@@ -179,7 +197,7 @@ header h1 {
 }
 
 .block-title {
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-dim);
   margin-bottom: 8px;
@@ -222,7 +240,9 @@ header h1 {
   stroke-width: 2;
 }
 
-/* Beschriftungen tragen Text-Token, nie die Datenfarbe. */
+/* Beschriftungen tragen Text-Token, nie die Datenfarbe. Die Größen
+   bleiben in px, nicht in der Typo-Skala: sie gelten in den
+   viewBox-Einheiten des SVG und skalieren mit der Diagrammbreite mit. */
 .pnl-chart .tick-label {
   fill: var(--text-dim);
   font-size: 10px;
@@ -243,12 +263,12 @@ header h1 {
 }
 
 .pnl-single .value {
-  font-size: 1.25rem;
+  font-size: var(--fs-xl);
   font-weight: 700;
 }
 
 .pnl-single .meta {
-  font-size: 0.75rem;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
 }
 
@@ -263,25 +283,30 @@ header h1 {
 }
 
 .activity-headline {
-  font-size: 0.92rem;
+  font-size: var(--fs-md);
   font-weight: 600;
   margin-bottom: 2px;
 }
 
 .activity-sub {
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   color: var(--text-dim);
 }
 
 /* Die Einschränkung ist bewusst auffällig: ohne sie wird die Zahl leicht
-   für einen Fehlerbericht gehalten. */
+   für einen Fehlerbericht gehalten. Kastenform wie #error-banner (voller
+   Rahmen, symmetrischer Radius, getönter Grund), nur in Amber statt Rot -
+   die frühere Links-Streifen-Variante war der einzige Kasten dieser Art
+   in der App und wirkte dadurch wie loser Fließtext.
+   Schriftgröße bewusst Fließtext-Stufe, nicht Label-Stufe: das ist ein
+   Absatz, der gelesen werden soll, keine Randnotiz. */
 .activity-caveat {
   margin-top: 10px;
-  padding: 8px 10px;
-  border-left: 3px solid var(--warn);
+  padding: 10px 12px;
+  border: 1px solid var(--warn);
   background: rgba(232, 179, 74, 0.08);
-  border-radius: 0 8px 8px 0;
-  font-size: 0.74rem;
+  border-radius: 10px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
   color: var(--text);
 }
@@ -299,7 +324,7 @@ header h1 {
 }
 
 .unrealized-block .unrealized-title {
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-dim);
   margin-bottom: 8px;
@@ -315,7 +340,7 @@ header h1 {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  font-size: 0.85rem;
+  font-size: var(--fs-sm);
 }
 
 .unrealized-row .bot-name {
@@ -324,7 +349,7 @@ header h1 {
 }
 
 .unrealized-hint {
-  font-size: 0.7rem;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
   margin-top: 10px;
   font-style: italic;
@@ -352,14 +377,16 @@ header h1 {
 
 .card-title {
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: var(--fs-md);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
+/* Der OK-Badge ist der Normalfall und bleibt grau. Farbe bekommt nur die
+   Abweichung ("Keine Daten" in Amber). */
 .badge {
-  font-size: 0.68rem;
+  font-size: var(--fs-xs);
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -368,58 +395,54 @@ header h1 {
   letter-spacing: 0.03em;
 }
 
-.badge.ok {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
 .badge.no_data {
   color: var(--warn);
   border-color: var(--warn);
 }
 
+/* Kennzahlen ohne eigenen Kasten: Die Karte ist der einzige Rahmen.
+   Label über Wert bildet das Paar, der Spaltenabstand trennt die Paare -
+   verschachtelte Kästen erzeugten zuvor bis zu elf Rahmen pro Karte. */
 .metrics-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
-  gap: 8px;
-  margin: 10px 0;
+  gap: 14px 12px;
+  margin: 12px 0;
 }
 
 .metric {
-  background: var(--surface-2);
-  border-radius: 10px;
-  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .metric .label {
-  font-size: 0.65rem;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
 
 .metric .value {
-  font-size: 0.92rem;
+  font-size: var(--fs-md);
   font-weight: 600;
-  margin-top: 2px;
   word-break: break-word;
 }
 
 .value.pos { color: var(--accent); }
 .value.neg { color: var(--danger); }
 
+/* Positionen als Liste mit Haarlinien statt als Stapel einzelner Kästen. */
 .positions {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .position {
-  background: var(--surface-2);
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-size: 0.8rem;
+  border-top: 1px solid var(--border);
+  padding: 9px 0;
+  font-size: var(--fs-sm);
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -427,7 +450,7 @@ header h1 {
 }
 
 .position .dry-run-tag {
-  font-size: 0.62rem;
+  font-size: var(--fs-xs);
   color: var(--warn);
   border: 1px solid var(--warn);
   border-radius: 6px;
@@ -436,7 +459,7 @@ header h1 {
 }
 
 .last-activity {
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
   margin-top: 10px;
 }
@@ -450,7 +473,7 @@ header h1 {
 
 .no-data-text {
   color: var(--text-dim);
-  font-size: 0.85rem;
+  font-size: var(--fs-sm);
 }
 
 /* Login-Overlay */
@@ -480,12 +503,12 @@ header h1 {
 
 .login-box h2 {
   margin-top: 0;
-  font-size: 1.05rem;
+  font-size: var(--fs-lg);
 }
 
 .login-box label {
   display: block;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
   color: var(--text-dim);
   margin: 12px 0 4px;
 }
@@ -497,18 +520,18 @@ header h1 {
   color: var(--text);
   border-radius: 10px;
   padding: 10px 12px;
-  font-size: 0.9rem;
+  font-size: var(--fs-md);
 }
 
 .login-box .hint {
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
   margin-top: 4px;
 }
 
 .login-box .login-error {
   color: var(--danger);
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   margin-top: 10px;
   display: none;
 }
@@ -517,16 +540,18 @@ header h1 {
   display: block;
 }
 
+/* Die einzige Primäraktion der App: hervorgehoben durch Helligkeit
+   statt durch Grün - Grün ist für Geld im Plus reserviert. */
 .login-box button {
   width: 100%;
   margin-top: 16px;
-  background: var(--accent);
-  color: #06110c;
+  background: var(--text);
+  color: var(--bg);
   border: none;
   border-radius: 10px;
   padding: 11px;
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: var(--fs-md);
 }
 
 .login-box button:active {
