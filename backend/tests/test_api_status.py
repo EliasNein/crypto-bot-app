@@ -46,6 +46,7 @@ def test_status_aggregates_all_four_bots(tmp_path, monkeypatch):
         "overview",
         "investment_activity",
         "pnl_verlauf",
+        "heartbeat",
     }
     assert body["dca"]["status"] == "ok"
     assert body["grid"]["status"] == "ok"

@@ -501,3 +501,103 @@ def summarize_pnl_history(grid_path: Path, trend_path: Path) -> list[dict]:
             }
         )
     return verlauf
+
+
+HEARTBEAT_FILES = (
+    ("dca", "heartbeat_dca.json"),
+    ("grid", "heartbeat_grid.json"),
+    ("trend", "heartbeat_trend.json"),
+    ("allocator", "heartbeat_allocator.json"),
+)
+
+# Bewusst EINE großzügige, bot-unabhängige Schwelle. Die tatsächlichen
+# Zyklus-Intervalle stehen auf Bot-Seite und sind dort konfigurierbar -
+# diese App erführe eine Änderung nie. Eine geratene, bot-spezifische
+# Schwelle würde deshalb entweder Fehlalarme erzeugen oder einen echten
+# Ausfall verschweigen. 48 Stunden liegen sicher über dem längsten
+# bekannten Takt (24h) samt Puffer.
+STALE_SUCCESS_SECONDS = 48 * 3600
+
+
+def _heartbeat_status(
+    success_dt: datetime | None, failures: float, seconds_since_success: float | None
+) -> tuple[str, str | None]:
+    """(status, reason) aus den beiden robusten Signalen.
+
+    Nur zwei Dinge lösen eine Warnung aus, beide ohne Raten:
+    ein vom Bot selbst gemeldeter Fehlschlag, und eine bestätigte
+    Erfolgsmeldung, die älter als STALE_SUCCESS_SECONDS ist.
+
+    Ein Bot ohne jede Erfolgsmeldung, aber auch ohne Fehlschlag, ist
+    ausdrücklich KEINE Warnung: Nach einem Neustart ist genau das der
+    Normalzustand, bei einem 24h-Takt möglicherweise einen ganzen Tag
+    lang. Der Fall wird als 'ok' mit eigenem reason gemeldet, damit das
+    Frontend ihn sachlich benennen kann, statt eine Dauer zu behaupten,
+    die es nicht gibt.
+    """
+    if failures > 0:
+        return "warn", "consecutive_failures"
+    if success_dt is None:
+        return "ok", "no_confirmed_success"
+    if seconds_since_success is not None and seconds_since_success > STALE_SUCCESS_SECONDS:
+        return "warn", "stale_success"
+    return "ok", None
+
+
+def summarize_heartbeats(data_dir: Path, *, now: datetime | None = None) -> dict:
+    """Heartbeat-Status der vier Bot-Prozesse.
+
+    Der Bot schreibt je Prozess eine Datei mit last_successful_cycle,
+    last_cycle_attempt und consecutive_failures. Die Altersangaben werden
+    hier SERVERSEITIG berechnet: Die Dateien entstehen auf derselben
+    Maschine, die diese API bedient - damit ist die Differenz frei von
+    Uhren-Versatz zwischen Server und Endgerät. Bei einer
+    Lebendigkeits-Anzeige wäre eine falsch gehende Handy-Uhr sonst genau
+    die gefährliche Fehlerart: sie behauptete Stillstand, wo keiner ist.
+
+    Die Werte gelten nur für den aktuell laufenden Prozess - nach einem
+    Neustart beginnt die Zählung bei 0, auch wenn vorher lange erfolgreich
+    gelaufen wurde.
+    """
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    result: dict[str, dict] = {}
+
+    for bot, filename in HEARTBEAT_FILES:
+        data, error = _load_dict(data_dir / filename)
+        if error or not data:
+            # Fehlende Datei ist ausdrücklich keine Warnung - ein älteres
+            # crypto-bot-Deployment kennt das Feature schlicht noch nicht.
+            result[bot] = {
+                "status": "no_data",
+                "reason": None,
+                "error": error or f"Heartbeat-Datei {filename} ist leer.",
+                "last_successful_cycle": None,
+                "last_cycle_attempt": None,
+                "consecutive_failures": None,
+                "seconds_since_success": None,
+                "seconds_since_attempt": None,
+            }
+            continue
+
+        success_dt = _parse_utc_datetime(data.get("last_successful_cycle"))
+        attempt_dt = _parse_utc_datetime(data.get("last_cycle_attempt"))
+        seconds_since_success = (now - success_dt).total_seconds() if success_dt else None
+        seconds_since_attempt = (now - attempt_dt).total_seconds() if attempt_dt else None
+
+        # Für die Entscheidung wird der Wert in eine Zahl gezwungen, im
+        # Response bleibt der Rohwert stehen - ein unsinniger Eintrag soll
+        # sichtbar sein und nicht stillschweigend zu 0 werden.
+        failures = _num(data.get("consecutive_failures"), default=0) or 0.0
+        status, reason = _heartbeat_status(success_dt, failures, seconds_since_success)
+
+        result[bot] = {
+            "status": status,
+            "reason": reason,
+            "last_successful_cycle": data.get("last_successful_cycle"),
+            "last_cycle_attempt": data.get("last_cycle_attempt"),
+            "consecutive_failures": data.get("consecutive_failures"),
+            "seconds_since_success": seconds_since_success,
+            "seconds_since_attempt": seconds_since_attempt,
+        }
+
+    return result

@@ -133,6 +133,58 @@ Tag gar nichts. Diese Tage sind sonst nirgends sichtbar.
   Summe ändert sich nur an Abschlusstagen und bleibt dazwischen konstant.
 - Leere Liste, solange nichts Echtes abgeschlossen wurde.
 
+### `heartbeat` - läuft der jeweilige Bot-Prozess noch?
+
+Der Bot schreibt je Prozess eine Datei `heartbeat_{dca,grid,trend,allocator}.json`
+in dasselbe `DATA_DIR` wie die Ledger.
+
+```json
+"heartbeat": {
+  "grid": {
+    "status": "ok" | "warn" | "no_data",
+    "reason": null | "consecutive_failures" | "stale_success" | "no_confirmed_success",
+    "last_successful_cycle": "2026-09-25T11:55:00+00:00",
+    "last_cycle_attempt": "2026-09-25T11:59:00+00:00",
+    "consecutive_failures": 0,
+    "seconds_since_success": 300.4,
+    "seconds_since_attempt": 60.4
+  }
+}
+```
+
+- Der Rohinhalt der Datei wird unverändert durchgereicht - auch ein
+  unsinniger Wert bleibt sichtbar, statt still zu einem Default zu werden.
+- **Die Altersangaben rechnet der Server**, nicht der Browser: Die Dateien
+  entstehen auf derselben Maschine, die die API bedient, damit ist die
+  Differenz frei von Uhren-Versatz. Eine falsch gehende Handy-Uhr würde
+  ausgerechnet bei einer Lebendigkeits-Anzeige Stillstand behaupten, wo
+  keiner ist.
+- Fehlende oder kaputte Datei → `no_data` für **diesen** Bot, ohne die
+  anderen drei zu beeinträchtigen, und **ohne Warnung**: ein älteres
+  crypto-bot-Deployment kennt das Feature schlicht noch nicht.
+
+**Warum es keine bot-spezifischen Intervall-Schwellen gibt.** Die
+erwarteten Zyklus-Takte (DCA/Trend typischerweise 24h, Grid 5min,
+Allocator 60min) stehen auf Bot-Seite und sind dort konfigurierbar -
+diese App erführe eine Änderung nie. Eine geratene „müsste längst wieder
+gelaufen sein"-Schwelle würde deshalb entweder Fehlalarme erzeugen oder
+einen echten Ausfall verschweigen. Gewarnt wird nur anhand von zwei
+robusten, bot-unabhängigen Signalen:
+
+| Lage | Status | `reason` |
+|---|---|---|
+| `consecutive_failures > 0` (der Bot meldet es selbst) | `warn` | `consecutive_failures` |
+| Bestätigte Erfolgsmeldung älter als **48 h** | `warn` | `stale_success` |
+| Noch keine bestätigte Erfolgsmeldung, aber auch kein Fehlschlag | `ok` | `no_confirmed_success` |
+| Sonst | `ok` | `null` |
+
+Der dritte Fall ist bewusst **keine** Warnung: Die Werte gelten nur für
+den aktuell laufenden Prozess, nach einem Neustart beginnt die Zählung
+bei 0. Bei einem 24h-Takt ist „noch kein erfolgreicher Zyklus" damit
+einen ganzen Tag lang der Normalzustand. Das Frontend benennt ihn
+sachlich („Noch kein erfolgreicher Zyklus seit Prozessstart"), statt eine
+Dauer zu behaupten, die es nicht gibt.
+
 ### Tests
 
 ```bash

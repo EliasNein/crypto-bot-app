@@ -441,6 +441,13 @@ header h1 {
   margin-top: 10px;
 }
 
+/* Heartbeat erbt den zurückhaltenden Stil von .last-activity; Warnungen
+   in Amber, nicht in Rot - Rot ist in dieser App für Geldverlust
+   reserviert und soll nicht für Prozess-Zustände verwässern. */
+.heartbeat.warn {
+  color: var(--warn);
+}
+
 .no-data-text {
   color: var(--text-dim);
   font-size: 0.85rem;

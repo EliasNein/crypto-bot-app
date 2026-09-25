@@ -24,6 +24,7 @@ from .ledger_readers import (
     summarize_allocator,
     summarize_dca,
     summarize_grid,
+    summarize_heartbeats,
     summarize_investment_activity,
     summarize_overview,
     summarize_pnl_history,
@@ -105,6 +106,7 @@ def status() -> dict:
         "overview": summarize_overview(dca_path, grid_path, trend_path),
         "investment_activity": summarize_investment_activity(dca_path, grid_path, trend_path),
         "pnl_verlauf": summarize_pnl_history(grid_path, trend_path),
+        "heartbeat": summarize_heartbeats(_data_dir()),
     }
 
 

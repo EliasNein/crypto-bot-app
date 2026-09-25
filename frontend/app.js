@@ -123,18 +123,23 @@
     return `${(value * 100).toFixed(1)}%`;
   }
 
-  function fmtRelativeTime(iso) {
-    if (!iso) return "keine Aktivität";
-    const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) return iso;
-    const diffMs = Date.now() - date.getTime();
-    const diffMin = Math.round(diffMs / 60000);
+  // Eine Kaskade für beide Zeitangaben auf der Karte, damit "Letzte
+  // Aktivität" und der Heartbeat identisch formulieren.
+  function fmtRelativeSeconds(seconds) {
+    if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return null;
+    const diffMin = Math.round(seconds / 60);
     if (diffMin < 1) return "gerade eben";
     if (diffMin < 60) return `vor ${diffMin} Min.`;
     const diffH = Math.round(diffMin / 60);
     if (diffH < 24) return `vor ${diffH} Std.`;
-    const diffD = Math.round(diffH / 24);
-    return `vor ${diffD} Tag(en)`;
+    return `vor ${Math.round(diffH / 24)} Tag(en)`;
+  }
+
+  function fmtRelativeTime(iso) {
+    if (!iso) return "keine Aktivität";
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    return fmtRelativeSeconds((Date.now() - date.getTime()) / 1000);
   }
 
   function el(tag, className, text) {
@@ -163,15 +168,59 @@
     return b;
   }
 
-  function buildCard(title, data, renderBody) {
+  // Die Altersangabe kommt als Sekunden vom Server, nicht aus dem
+  // ISO-Zeitstempel: Die Heartbeat-Dateien entstehen auf derselben
+  // Maschine wie die API, damit ist die Differenz frei von Uhren-Versatz.
+  // Eine falsch gehende Handy-Uhr würde sonst ausgerechnet bei der
+  // Lebendigkeits-Anzeige Stillstand behaupten, wo keiner ist.
+  function heartbeatLine(hb) {
+    if (!hb) return null;
+
+    if (hb.status === "no_data") {
+      return { text: "Kein Heartbeat verfügbar", warn: false };
+    }
+
+    if (hb.reason === "consecutive_failures") {
+      const n = hb.consecutive_failures;
+      const wort = n === 1 ? "Fehlschlag" : "Fehlschläge";
+      return { text: `⚠ ${n} ${wort} in Folge`, warn: true };
+    }
+
+    if (hb.reason === "stale_success") {
+      return { text: "⚠ Keine Erfolgsmeldung seit über 48h", warn: true };
+    }
+
+    if (hb.reason === "no_confirmed_success") {
+      // Bewusst neutral: direkt nach einem Neustart ist das der
+      // Normalzustand, bei 24h-Takt womöglich einen ganzen Tag lang.
+      return { text: "Noch kein erfolgreicher Zyklus seit Prozessstart", warn: false };
+    }
+
+    const relativ = fmtRelativeSeconds(hb.seconds_since_success);
+    return { text: `Letzter erfolgreicher Zyklus: ${relativ || "unbekannt"}`, warn: false };
+  }
+
+  function buildCard(title, data, renderBody, heartbeat) {
     const card = el("div", "card");
     const header = el("div", "card-header");
     header.appendChild(el("div", "card-title", title));
     header.appendChild(badge(data.status));
     card.appendChild(header);
 
+    // Der Heartbeat gehört auch dann auf die Karte, wenn das Ledger
+    // fehlt: "Datei weg, Prozess läuft" ist eine andere Lage als
+    // "Prozess tot" - und genau dann braucht man die Unterscheidung.
+    const puls = heartbeatLine(heartbeat);
+    const pulsZeile = puls
+      ? el("div", `last-activity heartbeat${puls.warn ? " warn" : ""}`, puls.text)
+      : null;
+    if (pulsZeile && heartbeat && heartbeat.last_successful_cycle) {
+      pulsZeile.title = `Letzter Erfolg laut Bot: ${heartbeat.last_successful_cycle}`;
+    }
+
     if (data.status !== "ok") {
       card.appendChild(el("div", "no-data-text", data.error || "Keine Daten verfügbar."));
+      if (pulsZeile) card.appendChild(pulsZeile);
       return card;
     }
 
@@ -182,6 +231,8 @@
       activity.title = data.last_activity || "";
       card.appendChild(activity);
     }
+
+    if (pulsZeile) card.appendChild(pulsZeile);
 
     return card;
   }
@@ -194,7 +245,7 @@
     return row;
   }
 
-  function cardDca(data) {
+  function cardDca(data, heartbeat) {
     return buildCard("DCA-Bot", data, (card) => {
       const metrics = el("div", "metrics-row");
       metrics.appendChild(metric("Käufe (echt)", String(data.metrics.real_trades)));
@@ -215,10 +266,10 @@
         }
         card.appendChild(list);
       }
-    });
+    }, heartbeat);
   }
 
-  function cardGrid(data) {
+  function cardGrid(data, heartbeat) {
     return buildCard("Grid-Bot", data, (card) => {
       const metrics = el("div", "metrics-row");
       metrics.appendChild(metric("Offen", String(data.metrics.open_positions)));
@@ -243,10 +294,10 @@
         }
         card.appendChild(list);
       }
-    });
+    }, heartbeat);
   }
 
-  function cardTrend(data) {
+  function cardTrend(data, heartbeat) {
     return buildCard("Trend-Bot", data, (card) => {
       const metrics = el("div", "metrics-row");
       metrics.appendChild(metric("Offen", String(data.metrics.open_trades)));
@@ -271,10 +322,10 @@
         }
         card.appendChild(list);
       }
-    });
+    }, heartbeat);
   }
 
-  function cardAllocator(data) {
+  function cardAllocator(data, heartbeat) {
     return buildCard("Allocator", data, (card) => {
       const metrics = el("div", "metrics-row");
       metrics.appendChild(metric("Trend-Anteil", fmtPct(data.trend_fraction)));
@@ -286,7 +337,7 @@
         metrics.appendChild(metric("Richtung", data.direction));
       }
       card.appendChild(metrics);
-    });
+    }, heartbeat);
   }
 
   const BOT_LABELS = { dca: "DCA", grid: "Grid", trend: "Trend" };
@@ -631,11 +682,12 @@
     renderPnlHistory(data.pnl_verlauf);
     renderActivity(data.investment_activity);
 
+    const puls = data.heartbeat || {};
     els.cards.innerHTML = "";
-    els.cards.appendChild(cardDca(data.dca));
-    els.cards.appendChild(cardGrid(data.grid));
-    els.cards.appendChild(cardTrend(data.trend));
-    els.cards.appendChild(cardAllocator(data.allocator));
+    els.cards.appendChild(cardDca(data.dca, puls.dca));
+    els.cards.appendChild(cardGrid(data.grid, puls.grid));
+    els.cards.appendChild(cardTrend(data.trend, puls.trend));
+    els.cards.appendChild(cardAllocator(data.allocator, puls.allocator));
   }
 
   // --- Datenabruf ----------------------------------------------------------
