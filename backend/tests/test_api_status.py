@@ -38,7 +38,15 @@ def test_status_aggregates_all_four_bots(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
-    assert set(body.keys()) == {"dca", "grid", "trend", "allocator", "overview"}
+    assert set(body.keys()) == {
+        "dca",
+        "grid",
+        "trend",
+        "allocator",
+        "overview",
+        "investment_activity",
+        "pnl_verlauf",
+    }
     assert body["dca"]["status"] == "ok"
     assert body["grid"]["status"] == "ok"
     assert body["trend"]["status"] == "ok"
