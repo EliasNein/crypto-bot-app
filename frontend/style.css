@@ -168,6 +168,128 @@ header h1 {
   color: var(--danger);
 }
 
+/* --- PnL-Verlauf ------------------------------------------------------- */
+
+.pnl-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+
+.block-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.pnl-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/* Achsen und Nulllinie: hauchdünn, durchgezogen, zurückhaltend. */
+.pnl-chart .axis-line {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.pnl-chart .zero-line {
+  stroke: var(--text-dim);
+  stroke-width: 1;
+  opacity: 0.45;
+}
+
+.pnl-chart .series-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.pnl-chart .series-area {
+  stroke: none;
+  opacity: 0.1;
+}
+
+/* 2px Ring in Flächenfarbe, damit der Endpunkt über der Linie lesbar bleibt. */
+.pnl-chart .end-dot {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+/* Beschriftungen tragen Text-Token, nie die Datenfarbe. */
+.pnl-chart .tick-label {
+  fill: var(--text-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pnl-chart .end-label {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pnl-single {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pnl-single .value {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.pnl-single .meta {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+/* --- Investitionsaktivität --------------------------------------------- */
+
+.activity-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.activity-headline {
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.activity-sub {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+/* Die Einschränkung ist bewusst auffällig: ohne sie wird die Zahl leicht
+   für einen Fehlerbericht gehalten. */
+.activity-caveat {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--warn);
+  background: rgba(232, 179, 74, 0.08);
+  border-radius: 0 8px 8px 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.activity-caveat strong {
+  color: var(--warn);
+}
+
 .unrealized-block {
   background: var(--surface);
   border: 1px solid var(--border);

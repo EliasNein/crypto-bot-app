@@ -16,6 +16,7 @@ Modul liest diese Struktur nur nach, importiert aber keinen Code von dort.
 from __future__ import annotations
 
 import json
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -96,6 +97,29 @@ def _latest(values: list[Any]) -> str | None:
     """
     present = [v for v in values if isinstance(v, str) and v]
     return max(present) if present else None
+
+
+def _parse_utc_datetime(value: Any) -> datetime | None:
+    """Zeitstempel aus dem Ledger als UTC-datetime, oder None.
+
+    Ein Eintrag ohne Zeitzone wird als UTC gelesen - der Bot schreibt
+    zwar durchgängig '+00:00', aber ein handgepflegter Eintrag ohne
+    Offset soll den Tagesschnitt nicht verschieben.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _utc_date(value: Any) -> date | None:
+    parsed = _parse_utc_datetime(value)
+    return parsed.date() if parsed else None
 
 
 def _cost_basis(records: list[dict]) -> dict:
@@ -322,3 +346,158 @@ def summarize_overview(dca_path: Path, grid_path: Path, trend_path: Path) -> dic
             "hinweis": "kein Live-Kurs, daher keine Berechnung des unrealisierten Gewinns/Verlusts",
         },
     }
+
+
+# Feld, das bei jedem Bot den KAUF-/Einstiegszeitpunkt trägt. Der DCA-Bot
+# kennt nur Käufe, Grid und Trend tragen den Verkauf in eigenen Feldern.
+_BUY_TIME_FIELDS = (("dca", "timestamp"), ("grid", "bought_at"), ("trend", "entry_time"))
+
+
+def _buy_days_by_mode(
+    records_by_bot: dict[str, list[dict]],
+) -> tuple[set[date], set[date]]:
+    """(Tage mit echtem Kauf, Tage mit Dry-Run-Kauf) über alle Bots hinweg.
+
+    Einträge ohne auswertbares `dry_run`-Feld landen in keiner der beiden
+    Mengen - dieselbe konservative Regel wie überall sonst: lieber nicht
+    mitzählen als raten.
+    """
+    real_days: set[date] = set()
+    dry_run_days: set[date] = set()
+
+    for bot, time_field in _BUY_TIME_FIELDS:
+        for record in records_by_bot.get(bot, []):
+            day = _utc_date(record.get(time_field))
+            if day is None:
+                continue
+            flag = record.get("dry_run")
+            if flag is False:
+                real_days.add(day)
+            elif flag is True:
+                dry_run_days.add(day)
+
+    return real_days, dry_run_days
+
+
+def summarize_investment_activity(
+    dca_path: Path,
+    grid_path: Path,
+    trend_path: Path,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    """An wie vielen Tagen hat das kombinierte System überhaupt investiert?
+
+    Hintergrund: Skaliert der Allocator den DCA-Betrag unter das
+    Mindestvolumen und hat der Trend-Bot am selben Tag kein bestätigtes
+    Signal, kauft das System an diesem Tag gar nichts. Diese Tage sind
+    sonst nirgends sichtbar.
+
+    Der HEUTIGE UTC-Tag bleibt außen vor. Er ist noch nicht vorbei, ein
+    Kauf könnte noch folgen - würde er mitgezählt, startete jeder Tag um
+    00:00 UTC zwangsläufig als "ohne Aktivität", und die Quote schwankte
+    im Tagesverlauf. Gezählt wird deshalb [erster echter Kauftag ...
+    gestern]. Der erste Tag braucht dadurch keine Sonderbehandlung: er ist
+    per Definition ein Kauftag.
+
+    `days_with_dry_run_activity` zählt bewusst über die GESAMTE Historie
+    (bis gestern), nicht nur im Fenster der echten Metrik - sonst wäre die
+    Paper-Trade-Phase unsichtbar, solange es noch keinen einzigen echten
+    Kauf gibt.
+
+    WICHTIG für die Interpretation: Das Ledger enthält kein Signal dafür,
+    ob der Bot überhaupt lief. Ein Tag ohne Kauf kann "Allocator hat
+    heruntergefahren und Trend hatte kein Signal" bedeuten - oder schlicht
+    "Bot war aus". Beides sieht in den Daten identisch aus.
+    """
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    today = now.date()
+    last_completed_day = today - timedelta(days=1)
+
+    dca_records, dca_error = _load_list(dca_path)
+    grid_records, grid_error = _load_list(grid_path)
+    trend_records, trend_error = _load_list(trend_path)
+
+    real_days, dry_run_days = _buy_days_by_mode(
+        {
+            "dca": [] if dca_error else dca_records,
+            "grid": [] if grid_error else grid_records,
+            "trend": [] if trend_error else trend_records,
+        }
+    )
+
+    completed_dry_run_days = len({day for day in dry_run_days if day <= last_completed_day})
+    today_has_activity = today in real_days
+
+    completed_real_days = {day for day in real_days if day <= last_completed_day}
+    if not completed_real_days:
+        # Noch kein einziger abgeschlossener Tag mit echtem Kauf - eine
+        # Quote wäre hier eine Division durch 0 und ohne Aussage.
+        return {
+            "status": "no_data",
+            "total_days_tracked": 0,
+            "days_with_activity": 0,
+            "days_without_activity": 0,
+            "days_without_activity_pct": None,
+            "days_with_dry_run_activity": completed_dry_run_days,
+            "today_has_activity": today_has_activity,
+        }
+
+    first_day = min(completed_real_days)
+    total_days = (last_completed_day - first_day).days + 1
+    days_with_activity = len(completed_real_days)
+    days_without_activity = total_days - days_with_activity
+
+    return {
+        "status": "ok",
+        "total_days_tracked": total_days,
+        "days_with_activity": days_with_activity,
+        "days_without_activity": days_without_activity,
+        "days_without_activity_pct": round(days_without_activity / total_days * 100, 1),
+        "days_with_dry_run_activity": completed_dry_run_days,
+        "today_has_activity": today_has_activity,
+    }
+
+
+def summarize_pnl_history(grid_path: Path, trend_path: Path) -> list[dict]:
+    """Realisierte PnL je Kalendertag (UTC) plus kumulierter Verlauf.
+
+    Stichtag ist der VERKAUF (sold_at / exit_time), nicht der Kauf - erst
+    dort entsteht ein realisierter Gewinn oder Verlust.
+
+    Nur echte, geschlossene Positionen. DCA fehlt hier zwangsläufig: der
+    Bot verkauft nie und führt deshalb kein realized_pnl. Tage ohne
+    Abschluss bekommen keinen Eintrag - die Liste hat bewusst Lücken,
+    das Frontend interpoliert beim Zeichnen.
+    """
+    grid_records, grid_error = _load_list(grid_path)
+    trend_records, trend_error = _load_list(trend_path)
+
+    per_day: dict[date, float] = {}
+    for records, time_field in (
+        ([] if grid_error else grid_records, "sold_at"),
+        ([] if trend_error else trend_records, "exit_time"),
+    ):
+        for record in records:
+            if record.get("status") == "open" or record.get("dry_run") is not False:
+                continue
+            pnl = _num(record.get("realized_pnl"), default=None)
+            if pnl is None:
+                continue
+            day = _utc_date(record.get(time_field))
+            if day is None:
+                continue
+            per_day[day] = per_day.get(day, 0.0) + pnl
+
+    verlauf = []
+    kumuliert = 0.0
+    for day in sorted(per_day):
+        kumuliert += per_day[day]
+        verlauf.append(
+            {
+                "datum": day.isoformat(),
+                "realisierte_pnl_an_diesem_tag": per_day[day],
+                "kumulierte_pnl_bis_zu_diesem_tag": kumuliert,
+            }
+        )
+    return verlauf

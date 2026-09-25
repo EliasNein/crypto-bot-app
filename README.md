@@ -58,6 +58,10 @@ Endpunkte:
 - `GET /api/status` - Token per Header `X-Dashboard-Token: <token>`.
   Ohne/mit falschem Token: `401`. Ein `?token=`-Query-Parameter wird
   bewusst **nicht** akzeptiert (siehe "Sicherheit").
+  Antwort: je ein Block für `dca`, `grid`, `trend` und `allocator`, dazu
+  `overview` (Gesamtgewinn/-verlust, unrealisierter Bestand) sowie die
+  beiden unten beschriebenen Felder `investment_activity` und
+  `pnl_verlauf`.
 - `GET /api/export/trades` - CSV-Export aller ECHTEN Trades (`dry_run: false`)
   aus allen drei Bots, chronologisch sortiert, als Download
   (`Content-Disposition: attachment`). Gleiche Header-Authentifizierung wie
@@ -69,6 +73,65 @@ Endpunkte:
   filtert nach Kauf- bzw. Verkaufs-Zeitpunkt der jeweiligen Zeile - eine
   Position, die vor dem Zeitraum eröffnet und erst darin verkauft wurde,
   zeigt dann nur die Verkaufs-Zeile. Ein ungültiger Wert liefert `400`.
+
+### `investment_activity` - an wie vielen Tagen wurde überhaupt investiert?
+
+Skaliert der Allocator den DCA-Betrag unter das Mindestvolumen und hat der
+Trend-Bot am selben Tag kein bestätigtes Signal, kauft das System an diesem
+Tag gar nichts. Diese Tage sind sonst nirgends sichtbar.
+
+```json
+"investment_activity": {
+  "status": "ok",
+  "total_days_tracked": 20,
+  "days_with_activity": 10,
+  "days_without_activity": 10,
+  "days_without_activity_pct": 50.0,
+  "days_with_dry_run_activity": 2,
+  "today_has_activity": false
+}
+```
+
+- Ein Tag gilt als aktiv, wenn **mindestens einer der drei Bots** an ihm
+  einen echten (`dry_run: false`) Kauf/Einstieg getätigt hat. Maßgeblich
+  sind `timestamp` (DCA), `bought_at` (Grid) und `entry_time` (Trend).
+- Das Fenster ist `[erster echter Kauftag … gestern]`, Tagesgrenze **UTC**.
+  Der **heutige Tag bleibt draußen**: er ist noch nicht vorbei, ein Kauf
+  könnte folgen. Würde er mitgezählt, startete jeder Tag um 00:00 UTC
+  zwangsläufig als "ohne Aktivität" und die Quote schwankte im Tagesverlauf.
+  `today_has_activity` weist den heutigen Stand rein informativ aus.
+- `days_with_dry_run_activity` zählt Tage mit simuliertem Kauf über die
+  **gesamte** Historie (bis gestern), unabhängig vom Fenster der echten
+  Metrik - sonst wäre die Paper-Trade-Phase unsichtbar, solange es noch
+  keinen einzigen echten Kauf gibt.
+- `status: "no_data"` (und `days_without_activity_pct: null`), solange es
+  keinen abgeschlossenen Tag mit echtem Kauf gibt - keine Division durch 0.
+
+> **Interpretationsgrenze:** Das Ledger enthält kein Signal dafür, ob der
+> Bot lief. Ein Tag ohne Kauf kann "Allocator heruntergefahren und kein
+> Trend-Signal" bedeuten - oder schlicht "Bot war aus / Server neu
+> gestartet". Beides sieht in den Daten identisch aus. Das Frontend weist
+> ausdrücklich darauf hin; ohne diese Einschränkung ist die Zahl **kein
+> Fehlerbericht**.
+
+### `pnl_verlauf` - realisierte PnL über die Zeit
+
+```json
+"pnl_verlauf": [
+  {"datum": "2026-09-07", "realisierte_pnl_an_diesem_tag": 2.4, "kumulierte_pnl_bis_zu_diesem_tag": 2.4},
+  {"datum": "2026-09-10", "realisierte_pnl_an_diesem_tag": 1.1, "kumulierte_pnl_bis_zu_diesem_tag": 3.5}
+]
+```
+
+- Gruppiert nach **Verkaufs-/Ausstiegstag** (`sold_at` bzw. `exit_time`,
+  UTC) - erst dort entsteht ein realisierter Gewinn oder Verlust.
+- Nur echte (`dry_run: false`), geschlossene Grid- und Trend-Positionen.
+  DCA fehlt zwangsläufig: der Bot verkauft nie und führt kein
+  `realized_pnl`.
+- Tage ohne Abschluss bekommen **keinen** Eintrag; die Liste hat bewusst
+  Lücken. Das Frontend zeichnet deshalb eine Stufenkurve - die kumulierte
+  Summe ändert sich nur an Abschlusstagen und bleibt dazwischen konstant.
+- Leere Liste, solange nichts Echtes abgeschlossen wurde.
 
 ### Tests
 

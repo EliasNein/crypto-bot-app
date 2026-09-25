@@ -12,6 +12,8 @@
     cards: document.getElementById("cards"),
     overviewTiles: document.getElementById("overview-tiles"),
     unrealizedBlock: document.getElementById("unrealized-block"),
+    pnlBlock: document.getElementById("pnl-block"),
+    activityBlock: document.getElementById("activity-block"),
     overlay: document.getElementById("login-overlay"),
     inputToken: document.getElementById("input-token"),
     inputBase: document.getElementById("input-base"),
@@ -333,8 +335,301 @@
     );
   }
 
+  // --- PnL-Verlauf -------------------------------------------------------
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  function svgEl(tag, attrs) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [key, value] of Object.entries(attrs)) {
+      node.setAttribute(key, String(value));
+    }
+    return node;
+  }
+
+  function fmtShortDate(iso) {
+    const date = new Date(`${iso}T00:00:00Z`);
+    if (Number.isNaN(date.getTime())) return iso;
+    return `${String(date.getUTCDate()).padStart(2, "0")}.${String(date.getUTCMonth() + 1).padStart(2, "0")}.`;
+  }
+
+  function fmtSigned(value) {
+    const formatted = fmtPrice(Math.abs(value));
+    return `${value < 0 ? "−" : "+"}${formatted} USDT`;
+  }
+
+  function daysSinceEpoch(iso) {
+    return Date.parse(`${iso}T00:00:00Z`) / 86400000;
+  }
+
+  function buildPnlChart(verlauf) {
+    // Geometrie: der Platz für die Achsenbeschriftung ist eingeplant, damit
+    // die Karte nicht scrollen muss.
+    const W = 340;
+    const H = 150;
+    const padLeft = 46;
+    const padRight = 12;
+    const padTop = 14;
+    const padBottom = 20;
+    const plotW = W - padLeft - padRight;
+    const plotH = H - padTop - padBottom;
+
+    const points = verlauf.map((entry) => ({
+      x: daysSinceEpoch(entry.datum),
+      y: entry.kumulierte_pnl_bis_zu_diesem_tag,
+      datum: entry.datum,
+    }));
+
+    // Die kumulierte Summe gilt bis heute weiter - die Linie läuft flach
+    // bis zum aktuellen Tag, statt am letzten Abschluss abzubrechen.
+    const heute = Math.floor(Date.now() / 86400000);
+    const xMin = points[0].x;
+    const xMax = Math.max(points[points.length - 1].x, heute);
+    const xSpan = xMax - xMin || 1;
+
+    const werte = points.map((p) => p.y);
+    // Die Null gehört immer in die Skala: sie ist der neutrale Mittelpunkt,
+    // an dem sich Gewinn und Verlust scheiden.
+    const yHigh = Math.max(0, ...werte);
+    const yLow = Math.min(0, ...werte);
+    const ySpan = yHigh - yLow || 1;
+    const headroom = ySpan * 0.12;
+    const yTop = yHigh + headroom;
+    const yBottom = yLow - headroom;
+
+    const sx = (x) => padLeft + ((x - xMin) / xSpan) * plotW;
+    const sy = (y) => padTop + ((yTop - y) / (yTop - yBottom)) * plotH;
+
+    const svg = svgEl("svg", {
+      class: "pnl-chart",
+      viewBox: `0 0 ${W} ${H}`,
+      role: "img",
+      "aria-label": `Kumulierter realisierter Gewinn/Verlust, zuletzt ${fmtSigned(
+        points[points.length - 1].y
+      )}`,
+    });
+
+    const endFarbe = points[points.length - 1].y >= 0 ? "var(--accent)" : "var(--danger)";
+
+    // Stufenlinie: die kumulierte PnL springt am Abschlusstag und bleibt
+    // dazwischen konstant. Eine diagonale Verbindung würde einen stetigen
+    // Verlauf behaupten, den es nicht gab.
+    const segments = [`M ${sx(points[0].x)} ${sy(points[0].y)}`];
+    for (let i = 1; i < points.length; i += 1) {
+      segments.push(`L ${sx(points[i].x)} ${sy(points[i - 1].y)}`);
+      segments.push(`L ${sx(points[i].x)} ${sy(points[i].y)}`);
+    }
+    const letzterX = sx(xMax);
+    segments.push(`L ${letzterX} ${sy(points[points.length - 1].y)}`);
+    const linePath = segments.join(" ");
+
+    const yNull = sy(0);
+    const areaPath = `${linePath} L ${letzterX} ${yNull} L ${sx(points[0].x)} ${yNull} Z`;
+
+    // Die Null ist der neutrale Mittelpunkt: oberhalb Gewinn, unterhalb
+    // Verlust. Beide Hälften bekommen ihre eigene Farbe, statt die ganze
+    // Kurve nach dem Endstand einzufärben - sonst läge eine grüne Fläche
+    // unter der Nulllinie und behauptete Gewinn, wo Verlust stand.
+    const defs = svgEl("defs", {});
+    const clipGewinn = svgEl("clipPath", { id: "pnl-clip-gewinn" });
+    clipGewinn.appendChild(svgEl("rect", { x: 0, y: 0, width: W, height: Math.max(yNull, 0) }));
+    const clipVerlust = svgEl("clipPath", { id: "pnl-clip-verlust" });
+    clipVerlust.appendChild(
+      svgEl("rect", { x: 0, y: yNull, width: W, height: Math.max(H - yNull, 0) })
+    );
+    defs.appendChild(clipGewinn);
+    defs.appendChild(clipVerlust);
+    svg.appendChild(defs);
+
+    for (const [farbe, clipId] of [
+      ["var(--accent)", "pnl-clip-gewinn"],
+      ["var(--danger)", "pnl-clip-verlust"],
+    ]) {
+      svg.appendChild(
+        svgEl("path", {
+          class: "series-area",
+          fill: farbe,
+          d: areaPath,
+          "clip-path": `url(#${clipId})`,
+        })
+      );
+    }
+
+    svg.appendChild(
+      svgEl("line", { class: "zero-line", x1: padLeft, y1: yNull, x2: W - padRight, y2: yNull })
+    );
+
+    for (const [farbe, clipId] of [
+      ["var(--accent)", "pnl-clip-gewinn"],
+      ["var(--danger)", "pnl-clip-verlust"],
+    ]) {
+      svg.appendChild(
+        svgEl("path", {
+          class: "series-line",
+          stroke: farbe,
+          d: linePath,
+          "clip-path": `url(#${clipId})`,
+        })
+      );
+    }
+
+    // Endpunkt-Markierung am letzten tatsächlichen Abschluss.
+    const letzterPunkt = points[points.length - 1];
+    const dotX = sx(letzterPunkt.x);
+    const dotY = sy(letzterPunkt.y);
+    svg.appendChild(
+      svgEl("circle", { class: "end-dot", cx: dotX, cy: dotY, r: 4.5, fill: endFarbe })
+    );
+
+    // Nur der Endwert wird direkt beschriftet - eine Zahl an jedem Punkt
+    // wäre unlesbar.
+    const label = svgEl("text", {
+      class: "end-label",
+      x: dotX,
+      y: dotY - 9,
+      "text-anchor": dotX > W - padRight - 50 ? "end" : "middle",
+    });
+    label.textContent = fmtSigned(letzterPunkt.y);
+    svg.appendChild(label);
+
+    // Y-Achse: Extremwerte plus Null, mehr braucht es auf dem Handy nicht.
+    const yTicks = [yHigh, 0, yLow].filter(
+      (value, index, alle) => alle.indexOf(value) === index
+    );
+    for (const value of yTicks) {
+      const tick = svgEl("text", {
+        class: "tick-label",
+        x: padLeft - 6,
+        y: sy(value) + 3,
+        "text-anchor": "end",
+      });
+      tick.textContent = fmtPrice(value);
+      svg.appendChild(tick);
+    }
+
+    // X-Achse: erster und letzter Tag.
+    svg.appendChild(
+      svgEl("line", {
+        class: "axis-line",
+        x1: padLeft,
+        y1: H - padBottom,
+        x2: W - padRight,
+        y2: H - padBottom,
+      })
+    );
+    const von = svgEl("text", { class: "tick-label", x: padLeft, y: H - padBottom + 13 });
+    von.textContent = fmtShortDate(points[0].datum);
+    svg.appendChild(von);
+
+    const bis = svgEl("text", {
+      class: "tick-label",
+      x: W - padRight,
+      y: H - padBottom + 13,
+      "text-anchor": "end",
+    });
+    bis.textContent = "heute";
+    svg.appendChild(bis);
+
+    return svg;
+  }
+
+  function renderPnlHistory(verlauf) {
+    els.pnlBlock.innerHTML = "";
+    els.pnlBlock.appendChild(el("div", "block-title", "Realisierter Verlauf (kumuliert)"));
+
+    if (!Array.isArray(verlauf) || verlauf.length === 0) {
+      els.pnlBlock.appendChild(
+        el("div", "no-data-text", "Noch keine abgeschlossenen echten Trades - sobald der erste Verkauf realisiert ist, entsteht hier ein Verlauf.")
+      );
+      return;
+    }
+
+    if (verlauf.length === 1) {
+      // Ein einzelner Punkt ist kein Verlauf. Eine Linie aus einem Wert
+      // würde eine Entwicklung behaupten, die es nicht gibt - deshalb hier
+      // die Zahl selbst.
+      const einzig = verlauf[0];
+      const row = el("div", "pnl-single");
+      const wert = el(
+        "span",
+        `value ${einzig.kumulierte_pnl_bis_zu_diesem_tag >= 0 ? "pos" : "neg"}`,
+        fmtSigned(einzig.kumulierte_pnl_bis_zu_diesem_tag)
+      );
+      row.appendChild(wert);
+      row.appendChild(el("span", "meta", `einziger Abschlusstag: ${fmtShortDate(einzig.datum)}`));
+      els.pnlBlock.appendChild(row);
+      return;
+    }
+
+    els.pnlBlock.appendChild(buildPnlChart(verlauf));
+  }
+
+  // --- Investitionsaktivität ---------------------------------------------
+
+  function activityCaveat() {
+    const box = el("div", "activity-caveat");
+    box.appendChild(el("strong", "", "Wichtig zur Einordnung: "));
+    box.appendChild(
+      document.createTextNode(
+        "Ein Tag ohne Kauf bedeutet NICHT automatisch, dass die Strategie sich " +
+          "bewusst gegen einen Kauf entschieden hat. Das Ledger enthält kein " +
+          "Signal dafür, ob der Bot überhaupt lief - ein abgeschalteter Bot, ein " +
+          "Server-Neustart oder eine Downtime sehen in den Daten exakt gleich aus " +
+          "wie „Allocator heruntergefahren und kein Trend-Signal“. Diese " +
+          "Zahl ist ohne diese Einschränkung kein Fehlerbericht."
+      )
+    );
+    return box;
+  }
+
+  function renderActivity(activity) {
+    els.activityBlock.innerHTML = "";
+    els.activityBlock.appendChild(el("div", "block-title", "Investitionsaktivität"));
+
+    if (!activity) {
+      els.activityBlock.appendChild(el("div", "no-data-text", "Keine Daten verfügbar."));
+      return;
+    }
+
+    if (activity.status === "ok") {
+      els.activityBlock.appendChild(
+        el(
+          "div",
+          "activity-headline",
+          `An ${activity.days_with_activity} von ${activity.total_days_tracked} Tagen investiert`
+        )
+      );
+      els.activityBlock.appendChild(
+        el(
+          "div",
+          "activity-sub",
+          `${fmtNum(activity.days_without_activity_pct, 1)}% der abgeschlossenen Tage ohne Kauf` +
+            ` · heute ${activity.today_has_activity ? "bereits gekauft" : "bisher kein Kauf"}` +
+            " (heute zählt erst ab morgen mit)"
+        )
+      );
+    } else if (activity.days_with_dry_run_activity > 0) {
+      els.activityBlock.appendChild(el("div", "activity-headline", "Noch kein echter Kauf"));
+      els.activityBlock.appendChild(
+        el(
+          "div",
+          "activity-sub",
+          `Paper-Trade-Phase: an ${activity.days_with_dry_run_activity} Tagen simulierte Käufe. ` +
+            "Die Quote startet mit dem ersten echten Kauf."
+        )
+      );
+    } else {
+      els.activityBlock.appendChild(el("div", "no-data-text", "Noch keine Daten."));
+      return;
+    }
+
+    els.activityBlock.appendChild(activityCaveat());
+  }
+
   function render(data) {
     renderOverview(data.overview);
+    renderPnlHistory(data.pnl_verlauf);
+    renderActivity(data.investment_activity);
 
     els.cards.innerHTML = "";
     els.cards.appendChild(cardDca(data.dca));
