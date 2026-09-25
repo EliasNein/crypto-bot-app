@@ -10,9 +10,8 @@
     connText: document.getElementById("conn-text"),
     errorBanner: document.getElementById("error-banner"),
     cards: document.getElementById("cards"),
-    overviewTiles: document.getElementById("overview-tiles"),
+    heroBlock: document.getElementById("hero-block"),
     unrealizedBlock: document.getElementById("unrealized-block"),
-    pnlBlock: document.getElementById("pnl-block"),
     activityBlock: document.getElementById("activity-block"),
     overlay: document.getElementById("login-overlay"),
     inputToken: document.getElementById("input-token"),
@@ -151,7 +150,7 @@
 
   function metric(label, value, cls) {
     const wrap = el("div", "metric");
-    wrap.appendChild(el("div", "label", label));
+    wrap.appendChild(el("div", "field-label", label));
     wrap.appendChild(el("div", `value${cls ? " " + cls : ""}`, value));
     return wrap;
   }
@@ -173,11 +172,12 @@
   // Maschine wie die API, damit ist die Differenz frei von Uhren-Versatz.
   // Eine falsch gehende Handy-Uhr würde sonst ausgerechnet bei der
   // Lebendigkeits-Anzeige Stillstand behaupten, wo keiner ist.
+  // Texte beginnen klein, weil sie in der Fußzeile nach einem " · " stehen.
   function heartbeatLine(hb) {
     if (!hb) return null;
 
     if (hb.status === "no_data") {
-      return { text: "Kein Heartbeat verfügbar", warn: false };
+      return { text: "kein Heartbeat verfügbar", warn: false };
     }
 
     if (hb.reason === "consecutive_failures") {
@@ -187,53 +187,72 @@
     }
 
     if (hb.reason === "stale_success") {
-      return { text: "⚠ Keine Erfolgsmeldung seit über 48h", warn: true };
+      return { text: "⚠ keine Erfolgsmeldung seit über 48h", warn: true };
     }
 
     if (hb.reason === "no_confirmed_success") {
       // Bewusst neutral: direkt nach einem Neustart ist das der
       // Normalzustand, bei 24h-Takt womöglich einen ganzen Tag lang.
-      return { text: "Noch kein erfolgreicher Zyklus seit Prozessstart", warn: false };
+      return { text: "noch kein erfolgreicher Zyklus seit Prozessstart", warn: false };
     }
 
     const relativ = fmtRelativeSeconds(hb.seconds_since_success);
-    return { text: `Letzter erfolgreicher Zyklus: ${relativ || "unbekannt"}`, warn: false };
+    return { text: `letzter erfolgreicher Zyklus ${relativ || "unbekannt"}`, warn: false };
   }
 
-  function buildCard(title, data, renderBody, heartbeat) {
-    const card = el("div", "card");
-    const header = el("div", "card-header");
-    header.appendChild(el("div", "card-title", title));
-    header.appendChild(badge(data.status));
-    card.appendChild(header);
+  // Eine Fußzeile statt zwei fast gleicher: Ledger-Aktivität und
+  // Prozess-Heartbeat nebeneinander. Nur ein Warnungsteil wird amber, damit
+  // er genauso auffällt wie vorher als eigene Zeile. Die exakten
+  // Zeitstempel bleiben als Tooltip erhalten.
+  function cardFooter(data, heartbeat) {
+    const teile = [];
+
+    if (data.status === "ok" && data.last_activity !== undefined) {
+      const aktivitaet = el(
+        "span",
+        "",
+        data.last_activity ? `Aktivität ${fmtRelativeTime(data.last_activity)}` : "keine Aktivität"
+      );
+      aktivitaet.title = data.last_activity || "";
+      teile.push(aktivitaet);
+    }
 
     // Der Heartbeat gehört auch dann auf die Karte, wenn das Ledger
     // fehlt: "Datei weg, Prozess läuft" ist eine andere Lage als
     // "Prozess tot" - und genau dann braucht man die Unterscheidung.
     const puls = heartbeatLine(heartbeat);
-    const pulsZeile = puls
-      ? el("div", `last-activity heartbeat${puls.warn ? " warn" : ""}`, puls.text)
-      : null;
-    if (pulsZeile && heartbeat && heartbeat.last_successful_cycle) {
-      pulsZeile.title = `Letzter Erfolg laut Bot: ${heartbeat.last_successful_cycle}`;
+    if (puls) {
+      const pulsTeil = el("span", puls.warn ? "warn" : "", puls.text);
+      if (heartbeat && heartbeat.last_successful_cycle) {
+        pulsTeil.title = `Letzter Erfolg laut Bot: ${heartbeat.last_successful_cycle}`;
+      }
+      teile.push(pulsTeil);
     }
+
+    if (!teile.length) return null;
+    const footer = el("div", "card-footer");
+    teile.forEach((teil, i) => {
+      if (i) footer.appendChild(document.createTextNode(" · "));
+      footer.appendChild(teil);
+    });
+    return footer;
+  }
+
+  function buildCard(title, data, renderBody, heartbeat) {
+    const card = el("div", "card");
+    const header = el("div", "card-header");
+    header.appendChild(el("div", "block-title", title));
+    header.appendChild(badge(data.status));
+    card.appendChild(header);
 
     if (data.status !== "ok") {
       card.appendChild(el("div", "no-data-text", data.error || "Keine Daten verfügbar."));
-      if (pulsZeile) card.appendChild(pulsZeile);
-      return card;
+    } else {
+      renderBody(card);
     }
 
-    renderBody(card);
-
-    if (data.last_activity !== undefined) {
-      const activity = el("div", "last-activity", `Letzte Aktivität: ${fmtRelativeTime(data.last_activity)}`);
-      activity.title = data.last_activity || "";
-      card.appendChild(activity);
-    }
-
-    if (pulsZeile) card.appendChild(pulsZeile);
-
+    const footer = cardFooter(data, heartbeat);
+    if (footer) card.appendChild(footer);
     return card;
   }
 
@@ -243,6 +262,49 @@
     left.textContent = parts.join(" · ");
     row.appendChild(left);
     return row;
+  }
+
+  const SICHTBARE_POSITIONEN = 3;
+
+  // Welche Listen aufgeklappt sind. Das Dashboard baut die Karten alle 45 s
+  // neu auf - ohne diese Erinnerung klappte eine geöffnete Liste beim
+  // nächsten Refresh von selbst wieder zu.
+  const offeneListen = new Set();
+
+  // Die ersten Zeilen direkt, den Rest aufklappbar. Jede Position steht
+  // weiterhin im Dokument; nichts wird abgeschnitten, nur eingeklappt.
+  function positionList(schluessel, zeilen) {
+    const list = el("div", "positions");
+
+    // Eine einzelne Zeile wird nicht eingeklappt: "+1 weitere anzeigen"
+    // bräuchte genau so viel Platz wie die Zeile selbst.
+    if (zeilen.length <= SICHTBARE_POSITIONEN + 1) {
+      zeilen.forEach((zeile) => list.appendChild(zeile));
+      return list;
+    }
+
+    zeilen.slice(0, SICHTBARE_POSITIONEN).forEach((zeile) => list.appendChild(zeile));
+    const rest = zeilen.slice(SICHTBARE_POSITIONEN);
+
+    const details = document.createElement("details");
+    details.className = "positions-more";
+    const summary = document.createElement("summary");
+    const beschrifte = () => {
+      summary.textContent = details.open ? "weniger anzeigen" : `+${rest.length} weitere anzeigen`;
+    };
+    details.appendChild(summary);
+    rest.forEach((zeile) => details.appendChild(zeile));
+
+    details.open = offeneListen.has(schluessel);
+    beschrifte();
+    details.addEventListener("toggle", () => {
+      if (details.open) offeneListen.add(schluessel);
+      else offeneListen.delete(schluessel);
+      beschrifte();
+    });
+
+    list.appendChild(details);
+    return list;
   }
 
   function cardDca(data, heartbeat) {
@@ -258,13 +320,12 @@
       card.appendChild(metrics);
 
       if (data.open_positions.length) {
-        const list = el("div", "positions");
-        for (const p of data.open_positions.slice(-5).reverse()) {
-          list.appendChild(
-            buildPositionRow([p.symbol, `${fmtPrice(p.price)} USDT`, fmtQty(p.quantity)])
-          );
-        }
-        card.appendChild(list);
+        // Neueste zuerst. Früher wurde hier auf die fünf neuesten Käufe
+        // gekürzt - ältere verschwanden ohne jeden Hinweis.
+        const zeilen = [...data.open_positions]
+          .reverse()
+          .map((p) => buildPositionRow([p.symbol, `${fmtPrice(p.price)} USDT`, fmtQty(p.quantity)]));
+        card.appendChild(positionList("dca", zeilen));
       }
     }, heartbeat);
   }
@@ -280,8 +341,7 @@
       card.appendChild(metrics);
 
       if (data.open_positions.length) {
-        const list = el("div", "positions");
-        for (const p of data.open_positions) {
+        const zeilen = data.open_positions.map((p) => {
           const row = buildPositionRow([
             `Stufe ${p.level_index}`,
             `Kauf ${fmtPrice(p.buy_price)}`,
@@ -290,9 +350,9 @@
           if (p.dry_run) {
             row.appendChild(el("span", "dry-run-tag", "DRY-RUN"));
           }
-          list.appendChild(row);
-        }
-        card.appendChild(list);
+          return row;
+        });
+        card.appendChild(positionList("grid", zeilen));
       }
     }, heartbeat);
   }
@@ -308,8 +368,7 @@
       card.appendChild(metrics);
 
       if (data.open_positions.length) {
-        const list = el("div", "positions");
-        for (const p of data.open_positions) {
+        const zeilen = data.open_positions.map((p) => {
           const row = buildPositionRow([
             `Einstieg ${fmtPrice(p.entry_price)}`,
             `Menge ${fmtQty(p.quantity)}`,
@@ -318,9 +377,9 @@
           if (p.dry_run) {
             row.appendChild(el("span", "dry-run-tag", "DRY-RUN"));
           }
-          list.appendChild(row);
-        }
-        card.appendChild(list);
+          return row;
+        });
+        card.appendChild(positionList("trend", zeilen));
       }
     }, heartbeat);
   }
@@ -352,27 +411,71 @@
     return `${qty} BTC zu Ø ${fmtPrice(entry.avg_price)} USDT Einstandspreis`;
   }
 
-  function renderOverview(overview) {
-    els.overviewTiles.innerHTML = "";
+  // Die Kernaussage der Seite: eine Zahl, die niemand mehr im Kopf
+  // ausrechnen muss. Bewusst "realisiert" und nicht "gesamt" - der
+  // DCA-Bestand fließt nicht ein, ein "Gesamtergebnis" würde also mehr
+  // behaupten, als die Zahl enthält.
+  function renderHero(overview, verlauf) {
+    const block = els.heroBlock;
+    block.innerHTML = "";
+    block.appendChild(el("div", "field-label", "Realisiertes Ergebnis"));
 
-    const gainTile = el("div", "tile gain");
-    gainTile.appendChild(el("div", "tile-label", "Gesamtgewinn"));
-    gainTile.appendChild(el("div", "tile-value", `${fmtPrice(overview.gesamtgewinn)} USDT`));
-    els.overviewTiles.appendChild(gainTile);
+    const gewinn = overview.gesamtgewinn;
+    const verlust = overview.gesamtverlust;
+    const hatVerlauf = Array.isArray(verlauf) && verlauf.length > 0;
 
-    const lossTile = el("div", "tile loss");
-    lossTile.appendChild(el("div", "tile-label", "Gesamtverlust"));
-    lossTile.appendChild(el("div", "tile-value", `${fmtPrice(overview.gesamtverlust)} USDT`));
-    els.overviewTiles.appendChild(lossTile);
+    // "Noch nie gehandelt" ist etwas anderes als "genau ausgeglichen" -
+    // eine große 0,00 würde das Erste als das Zweite ausgeben.
+    if (!hatVerlauf && gewinn === 0 && verlust === 0) {
+      block.appendChild(el("div", "hero-empty", "Noch kein realisiertes Ergebnis"));
+      block.appendChild(
+        el(
+          "div",
+          "hero-breakdown",
+          "Sobald der erste echte Trade geschlossen ist, erscheinen hier das Netto-Ergebnis und sein Verlauf."
+        )
+      );
+      return;
+    }
 
+    const netto = gewinn + verlust;
+    const gerundet = Math.round(netto * 100) / 100;
+    const richtung = gerundet > 0 ? " pos" : gerundet < 0 ? " neg" : "";
+    block.appendChild(
+      el("div", `value hero-value${richtung}`, gerundet === 0 ? "±0,00 USDT" : fmtSigned(netto))
+    );
+
+    // Nur die Netto-Zahl trägt Farbe; die Aufschlüsselung bleibt grau.
+    block.appendChild(
+      el(
+        "div",
+        "hero-breakdown",
+        `Gewinn ${fmtSignedPlain(gewinn)} · Verlust ${fmtSignedPlain(verlust)} USDT`
+      )
+    );
+
+    if (!hatVerlauf) return;
+
+    if (verlauf.length === 1) {
+      // Ein einzelner Punkt ist kein Verlauf - die Zahl steht schon oben.
+      block.appendChild(
+        el("div", "hero-meta", `Bisher ein einziger Abschlusstag: ${fmtShortDate(verlauf[0].datum)}`)
+      );
+      return;
+    }
+
+    block.appendChild(buildPnlChart(verlauf));
+  }
+
+  function renderUnrealized(overview) {
     const unrealized = overview["unrealisiert_geschätzt"] || {};
 
     els.unrealizedBlock.innerHTML = "";
-    els.unrealizedBlock.appendChild(el("div", "unrealized-title", "Unrealisiert (geschätzt)"));
+    els.unrealizedBlock.appendChild(el("div", "block-title", "Unrealisiert (geschätzt)"));
     const rows = el("div", "unrealized-rows");
     for (const key of ["dca", "grid", "trend"]) {
       const row = el("div", "unrealized-row");
-      row.appendChild(el("span", "bot-name", BOT_LABELS[key]));
+      row.appendChild(el("span", "field-label", BOT_LABELS[key]));
       row.appendChild(el("span", "", unrealizedRowText(unrealized[key])));
       rows.appendChild(row);
     }
@@ -404,9 +507,15 @@
     return `${String(date.getUTCDate()).padStart(2, "0")}.${String(date.getUTCMonth() + 1).padStart(2, "0")}.`;
   }
 
-  function fmtSigned(value) {
+  // Null ohne Vorzeichen - "Verlust +0,00" wäre sinnlos.
+  function fmtSignedPlain(value) {
     const formatted = fmtPrice(Math.abs(value));
-    return `${value < 0 ? "−" : "+"}${formatted} USDT`;
+    if (Math.round(value * 100) === 0) return formatted;
+    return `${value < 0 ? "−" : "+"}${formatted}`;
+  }
+
+  function fmtSigned(value) {
+    return `${fmtSignedPlain(value)} USDT`;
   }
 
   function daysSinceEpoch(iso) {
@@ -524,24 +633,19 @@
       );
     }
 
-    // Endpunkt-Markierung am letzten tatsächlichen Abschluss.
+    // Endpunkt-Markierung am letzten tatsächlichen Abschluss. Ohne
+    // Beschriftung: Der Wert steht als Netto-Ergebnis groß direkt über dem
+    // Diagramm - hier noch einmal wäre dieselbe Zahl zweimal übereinander.
     const letzterPunkt = points[points.length - 1];
-    const dotX = sx(letzterPunkt.x);
-    const dotY = sy(letzterPunkt.y);
     svg.appendChild(
-      svgEl("circle", { class: "end-dot", cx: dotX, cy: dotY, r: 4.5, fill: endFarbe })
+      svgEl("circle", {
+        class: "end-dot",
+        cx: sx(letzterPunkt.x),
+        cy: sy(letzterPunkt.y),
+        r: 4.5,
+        fill: endFarbe,
+      })
     );
-
-    // Nur der Endwert wird direkt beschriftet - eine Zahl an jedem Punkt
-    // wäre unlesbar.
-    const label = svgEl("text", {
-      class: "end-label",
-      x: dotX,
-      y: dotY - 9,
-      "text-anchor": dotX > W - padRight - 50 ? "end" : "middle",
-    });
-    label.textContent = fmtSigned(letzterPunkt.y);
-    svg.appendChild(label);
 
     // Y-Achse: Extremwerte plus Null, mehr braucht es auf dem Handy nicht.
     const yTicks = [yHigh, 0, yLow].filter(
@@ -582,37 +686,6 @@
     svg.appendChild(bis);
 
     return svg;
-  }
-
-  function renderPnlHistory(verlauf) {
-    els.pnlBlock.innerHTML = "";
-    els.pnlBlock.appendChild(el("div", "block-title", "Realisierter Verlauf (kumuliert)"));
-
-    if (!Array.isArray(verlauf) || verlauf.length === 0) {
-      els.pnlBlock.appendChild(
-        el("div", "no-data-text", "Noch keine abgeschlossenen echten Trades - sobald der erste Verkauf realisiert ist, entsteht hier ein Verlauf.")
-      );
-      return;
-    }
-
-    if (verlauf.length === 1) {
-      // Ein einzelner Punkt ist kein Verlauf. Eine Linie aus einem Wert
-      // würde eine Entwicklung behaupten, die es nicht gibt - deshalb hier
-      // die Zahl selbst.
-      const einzig = verlauf[0];
-      const row = el("div", "pnl-single");
-      const wert = el(
-        "span",
-        `value ${einzig.kumulierte_pnl_bis_zu_diesem_tag >= 0 ? "pos" : "neg"}`,
-        fmtSigned(einzig.kumulierte_pnl_bis_zu_diesem_tag)
-      );
-      row.appendChild(wert);
-      row.appendChild(el("span", "meta", `einziger Abschlusstag: ${fmtShortDate(einzig.datum)}`));
-      els.pnlBlock.appendChild(row);
-      return;
-    }
-
-    els.pnlBlock.appendChild(buildPnlChart(verlauf));
   }
 
   // --- Investitionsaktivität ---------------------------------------------
@@ -678,8 +751,8 @@
   }
 
   function render(data) {
-    renderOverview(data.overview);
-    renderPnlHistory(data.pnl_verlauf);
+    renderHero(data.overview, data.pnl_verlauf);
+    renderUnrealized(data.overview);
     renderActivity(data.investment_activity);
 
     const puls = data.heartbeat || {};

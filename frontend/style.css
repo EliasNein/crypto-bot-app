@@ -15,16 +15,36 @@
   --danger: #ef5a5a;
   --warn: #e8b34a;
 
-  /* Typo-Skala: fünf Stufen statt der zuvor zwanzig Einzelwerte, die
-     sich teils um 0,02rem unterschieden - sichtbar war das nicht, aber
-     es verhinderte jeden Rhythmus. Neue Elemente nehmen eine dieser
-     Stufen, keinen eigenen Wert. */
-  --fs-xs: 0.72rem; /* Labels, Meta, Zeitangaben */
-  --fs-sm: 0.82rem; /* Nebentexte, Abschnittstitel, Fließtext */
-  --fs-md: 0.95rem; /* Kartentitel, Kennzahlen */
-  --fs-lg: 1.15rem; /* Seitentitel */
-  --fs-xl: 1.35rem; /* Hervorgehobene Beträge */
+  /* Typo-Skala. Neue Elemente nehmen eine dieser Stufen, keinen eigenen
+     Wert. --fs-hero ist die einzige Ausnahme vom Fünferschritt und gilt
+     ausschließlich für die Netto-Zahl des Ergebnis-Blocks: Die Seite
+     braucht genau eine Zahl, die dominiert. */
+  --fs-xs: 0.72rem; /* Feldlabels, Meta, Zeitangaben */
+  --fs-sm: 0.82rem; /* Nebentexte, Fließtext */
+  --fs-md: 0.95rem; /* Kastentitel, Kennzahlen */
+  --fs-lg: 1.15rem; /* Seitentitel, Zonen */
+  --fs-xl: 1.35rem; /* reserviert für hervorgehobene Einzelwerte */
+  --fs-hero: 2.25rem; /* nur die Netto-Zahl */
+
+  /* Abstands-Skala: jedes padding, margin und gap nimmt eine Stufe. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+
+  /* Zwei Radien: außen für Kästen, innen für alles darin. */
+  --r-out: 12px;
+  --r-in: 8px;
 }
+
+/* Bewusst NICHT auf der Skala, jeweils mit Grund:
+   - Rahmenstärken (1px): keine Abstände.
+   - Feste Maße (Statuspunkt 8px, Zahnrad-Button 38px, Breite des
+     Zeitraum-Felds, Mindestbreiten): Größen, keine Abstände.
+   - Badge-Pille (999px) und Statuspunkt (50%): Formen, keine Radien.
+   - Diagramm: Abstände und Schriftgrößen stehen in SVG-viewBox-Einheiten
+     und skalieren mit der Diagrammbreite, siehe buildPnlChart(). */
 
 * {
   box-sizing: border-box;
@@ -39,8 +59,8 @@ html, body {
 }
 
 body {
-  padding: 16px;
-  padding-bottom: 48px;
+  padding: var(--sp-4);
+  padding-bottom: calc(var(--sp-5) * 2);
   max-width: 720px;
   margin: 0 auto;
 }
@@ -49,7 +69,7 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: var(--sp-4);
 }
 
 header h1 {
@@ -60,9 +80,10 @@ header h1 {
 .status-line {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   font-size: var(--fs-sm);
   color: var(--text-dim);
+  margin-bottom: var(--sp-3);
 }
 
 /* Nur der Fehlerfall bekommt Farbe. Verbunden ist der Normalzustand -
@@ -81,9 +102,10 @@ header h1 {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 10px;
+  border-radius: var(--r-in);
   width: 38px;
   height: 38px;
+  padding: 0;
   font-size: var(--fs-lg);
   display: flex;
   align-items: center;
@@ -98,9 +120,9 @@ header h1 {
   background: rgba(239, 90, 90, 0.12);
   border: 1px solid var(--danger);
   color: #ffb4b4;
-  padding: 10px 12px;
-  border-radius: 10px;
-  margin-bottom: 14px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-in);
+  margin-bottom: var(--sp-3);
   font-size: var(--fs-sm);
   display: none;
 }
@@ -111,8 +133,7 @@ header h1 {
 
 .export-row {
   display: flex;
-  gap: 8px;
-  margin-bottom: 14px;
+  gap: var(--sp-2);
 }
 
 /* Neutral: eine Aktion, kein Geldbetrag. */
@@ -122,8 +143,8 @@ header h1 {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 10px;
-  padding: 11px;
+  border-radius: var(--r-in);
+  padding: var(--sp-3);
   font-size: var(--fs-sm);
   font-weight: 600;
 }
@@ -137,77 +158,108 @@ header h1 {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 10px;
-  padding: 0 8px;
+  border-radius: var(--r-in);
+  padding: 0 var(--sp-2);
   font-size: var(--fs-sm);
 }
 
-.overview-tiles {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-bottom: 12px;
+/* --- Zonen ---------------------------------------------------------------
+   Zwei Bereiche statt einer langen Liste gleichwertiger Kästen: Der
+   größere Abstand ZWISCHEN den Zonen gruppiert schon, bevor man die
+   Überschriften liest. */
+
+main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  margin-top: var(--sp-5);
 }
 
-.tile {
-  border-radius: 14px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
+.zone {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
 }
 
-.tile .tile-label {
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--text-dim);
-}
-
-.tile .tile-value {
-  font-size: var(--fs-xl);
+/* Gleiche Größe wie der Seitentitel: Die Skala hat keine Stufe zwischen
+   Seitentitel und Kastentitel, und eine siebte nur dafür wäre der Anfang
+   der nächsten Drift. */
+.zone-title {
+  font-size: var(--fs-lg);
   font-weight: 700;
-  margin-top: 4px;
+  color: var(--text);
+  margin: 0;
 }
 
-.tile.gain {
-  background: rgba(61, 220, 151, 0.1);
-  border-color: var(--accent);
-}
-
-.tile.gain .tile-value {
-  color: var(--accent);
-}
-
-.tile.loss {
-  background: rgba(239, 90, 90, 0.1);
-  border-color: var(--danger);
-}
-
-.tile.loss .tile-value {
-  color: var(--danger);
-}
-
-/* --- PnL-Verlauf ------------------------------------------------------- */
-
-.pnl-block {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 12px 16px;
-  margin-bottom: 12px;
-}
+/* --- Beschriftungen --------------------------------------------------------
+   Drei Ebenen, jede mit genau einem Stil: Zone > Kastentitel > Feldlabel.
+   Früher hatten Kästen derselben Ebene verschiedene Titel ("DCA-Bot" fett
+   und weiß, "Unrealisiert" grau und normal). */
 
 .block-title {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
   font-weight: 600;
-  color: var(--text-dim);
-  margin-bottom: 8px;
+  color: var(--text);
 }
+
+.field-label {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* --- Übersicht: gefüllte Kästen = Kernaussage ----------------------------- */
+
+.block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-out);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.block > .block-title {
+  margin-bottom: var(--sp-2);
+}
+
+/* Ergebnis-Block: eine dominante Zahl statt zwei gleich lauter Kacheln. */
+.hero-value {
+  font-size: var(--fs-hero);
+  font-weight: 700;
+  line-height: 1.1;
+  margin-top: var(--sp-1);
+}
+
+.hero-breakdown {
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  margin-top: var(--sp-1);
+}
+
+.hero-empty {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin-top: var(--sp-1);
+}
+
+.hero-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  margin-top: var(--sp-3);
+}
+
+.value.pos { color: var(--accent); }
+.value.neg { color: var(--danger); }
+
+/* --- PnL-Verlauf (im Ergebnis-Block) ------------------------------------- */
 
 .pnl-chart {
   display: block;
   width: 100%;
   height: auto;
   overflow: visible;
+  margin-top: var(--sp-3);
 }
 
 /* Achsen und Nulllinie: hauchdünn, durchgezogen, zurückhaltend. */
@@ -240,52 +292,49 @@ header h1 {
   stroke-width: 2;
 }
 
-/* Beschriftungen tragen Text-Token, nie die Datenfarbe. Die Größen
-   bleiben in px, nicht in der Typo-Skala: sie gelten in den
-   viewBox-Einheiten des SVG und skalieren mit der Diagrammbreite mit. */
+/* Beschriftungen tragen Text-Token, nie die Datenfarbe. Größen in px, weil
+   sie in viewBox-Einheiten gelten und mit der Diagrammbreite skalieren. */
 .pnl-chart .tick-label {
   fill: var(--text-dim);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
-.pnl-chart .end-label {
-  fill: var(--text);
-  font-size: 11px;
-  font-weight: 600;
-}
+/* --- Unrealisiert --------------------------------------------------------- */
 
-.pnl-single {
+.unrealized-rows {
   display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.unrealized-row {
+  display: flex;
+  justify-content: space-between;
   align-items: baseline;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
 }
 
-.pnl-single .value {
-  font-size: var(--fs-xl);
-  font-weight: 700;
+.unrealized-row .field-label {
+  min-width: 60px;
 }
 
-.pnl-single .meta {
+.unrealized-hint {
   font-size: var(--fs-xs);
   color: var(--text-dim);
+  margin-top: var(--sp-3);
+  font-style: italic;
 }
 
-/* --- Investitionsaktivität --------------------------------------------- */
+/* --- Investitionsaktivität ------------------------------------------------ */
 
-.activity-block {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-}
-
+/* Inhalt, kein Titel: normales Gewicht grenzt die Aussage vom fetten
+   Kastentitel darüber ab. */
 .activity-headline {
   font-size: var(--fs-md);
-  font-weight: 600;
-  margin-bottom: 2px;
+  font-weight: 400;
+  margin-bottom: var(--sp-1);
 }
 
 .activity-sub {
@@ -294,18 +343,15 @@ header h1 {
 }
 
 /* Die Einschränkung ist bewusst auffällig: ohne sie wird die Zahl leicht
-   für einen Fehlerbericht gehalten. Kastenform wie #error-banner (voller
-   Rahmen, symmetrischer Radius, getönter Grund), nur in Amber statt Rot -
-   die frühere Links-Streifen-Variante war der einzige Kasten dieser Art
-   in der App und wirkte dadurch wie loser Fließtext.
-   Schriftgröße bewusst Fließtext-Stufe, nicht Label-Stufe: das ist ein
+   für einen Fehlerbericht gehalten. Kastenform wie #error-banner, nur in
+   Amber. Schriftgröße Fließtext-Stufe, nicht Label-Stufe: das ist ein
    Absatz, der gelesen werden soll, keine Randnotiz. */
 .activity-caveat {
-  margin-top: 10px;
-  padding: 10px 12px;
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--warn);
   background: rgba(232, 179, 74, 0.08);
-  border-radius: 10px;
+  border-radius: var(--r-in);
   font-size: var(--fs-sm);
   line-height: 1.45;
   color: var(--text);
@@ -315,79 +361,36 @@ header h1 {
   color: var(--warn);
 }
 
-.unrealized-block {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-}
-
-.unrealized-block .unrealized-title {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--text-dim);
-  margin-bottom: 8px;
-}
-
-.unrealized-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.unrealized-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: var(--fs-sm);
-}
-
-.unrealized-row .bot-name {
-  color: var(--text-dim);
-  min-width: 60px;
-}
-
-.unrealized-hint {
-  font-size: var(--fs-xs);
-  color: var(--text-dim);
-  margin-top: 10px;
-  font-style: italic;
-}
+/* --- Bots: nur umrandet = Details ----------------------------------------- */
 
 .cards {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
+/* Rahmen ohne Füllung: Die Bot-Karten sind Nachschlage-Detail, die
+   gefüllten Kästen der Übersicht die Kernaussage. */
 .card {
-  background: var(--surface);
+  background: transparent;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 14px 16px;
+  border-radius: var(--r-out);
+  padding: var(--sp-3) var(--sp-4);
 }
 
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.card-title {
-  font-weight: 600;
-  font-size: var(--fs-md);
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  margin-bottom: var(--sp-2);
 }
 
 /* Der OK-Badge ist der Normalfall und bleibt grau. Farbe bekommt nur die
    Abweichung ("Keine Daten" in Amber). */
 .badge {
   font-size: var(--fs-xs);
-  padding: 2px 8px;
+  line-height: 1.6;
+  padding: 0 var(--sp-2);
   border-radius: 999px;
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -400,27 +403,18 @@ header h1 {
   border-color: var(--warn);
 }
 
-/* Kennzahlen ohne eigenen Kasten: Die Karte ist der einzige Rahmen.
-   Label über Wert bildet das Paar, der Spaltenabstand trennt die Paare -
-   verschachtelte Kästen erzeugten zuvor bis zu elf Rahmen pro Karte. */
+/* Kennzahlen ohne eigenen Kasten: Die Karte ist der einzige Rahmen. */
 .metrics-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
-  gap: 14px 12px;
-  margin: 12px 0;
+  gap: var(--sp-4) var(--sp-3);
+  margin: var(--sp-3) 0;
 }
 
 .metric {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-}
-
-.metric .label {
-  font-size: var(--fs-xs);
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+  gap: var(--sp-1);
 }
 
 .metric .value {
@@ -429,23 +423,20 @@ header h1 {
   word-break: break-word;
 }
 
-.value.pos { color: var(--accent); }
-.value.neg { color: var(--danger); }
-
 /* Positionen als Liste mit Haarlinien statt als Stapel einzelner Kästen. */
 .positions {
   display: flex;
   flex-direction: column;
-  margin-top: 4px;
+  margin-top: var(--sp-1);
 }
 
 .position {
   border-top: 1px solid var(--border);
-  padding: 9px 0;
+  padding: var(--sp-2) 0;
   font-size: var(--fs-sm);
   display: flex;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--sp-2);
   flex-wrap: wrap;
 }
 
@@ -453,21 +444,36 @@ header h1 {
   font-size: var(--fs-xs);
   color: var(--warn);
   border: 1px solid var(--warn);
-  border-radius: 6px;
-  padding: 0 5px;
+  border-radius: var(--r-in);
+  padding: 0 var(--sp-1);
   align-self: flex-start;
 }
 
-.last-activity {
-  font-size: var(--fs-xs);
+/* "+N weitere anzeigen": sieht aus wie eine weitere Listenzeile, nur
+   gedämpft. Aufgeklappt folgen die übrigen Positionen darunter. */
+.positions-more > summary {
+  list-style: none;
+  cursor: pointer;
+  border-top: 1px solid var(--border);
+  padding: var(--sp-2) 0;
+  font-size: var(--fs-sm);
   color: var(--text-dim);
-  margin-top: 10px;
 }
 
-/* Heartbeat erbt den zurückhaltenden Stil von .last-activity; Warnungen
-   in Amber, nicht in Rot - Rot ist in dieser App für Geldverlust
-   reserviert und soll nicht für Prozess-Zustände verwässern. */
-.heartbeat.warn {
+.positions-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Eine Fußzeile: Ledger-Aktivität und Prozess-Heartbeat nebeneinander.
+   Warnungen in Amber, nicht in Rot - Rot ist für Geldverlust reserviert. */
+.card-footer {
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-dim);
+  margin-top: var(--sp-3);
+}
+
+.card-footer .warn {
   color: var(--warn);
 }
 
@@ -476,7 +482,8 @@ header h1 {
   font-size: var(--fs-sm);
 }
 
-/* Login-Overlay */
+/* --- Login-Overlay --------------------------------------------------------- */
+
 #login-overlay {
   position: fixed;
   inset: 0;
@@ -484,7 +491,7 @@ header h1 {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: var(--sp-4);
   z-index: 20;
 }
 
@@ -495,8 +502,8 @@ header h1 {
 .login-box {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 20px;
+  border-radius: var(--r-out);
+  padding: var(--sp-5);
   width: 100%;
   max-width: 360px;
 }
@@ -510,7 +517,7 @@ header h1 {
   display: block;
   font-size: var(--fs-sm);
   color: var(--text-dim);
-  margin: 12px 0 4px;
+  margin: var(--sp-3) 0 var(--sp-1);
 }
 
 .login-box input {
@@ -518,21 +525,21 @@ header h1 {
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-radius: var(--r-in);
+  padding: var(--sp-2) var(--sp-3);
   font-size: var(--fs-md);
 }
 
 .login-box .hint {
   font-size: var(--fs-xs);
   color: var(--text-dim);
-  margin-top: 4px;
+  margin-top: var(--sp-1);
 }
 
 .login-box .login-error {
   color: var(--danger);
   font-size: var(--fs-sm);
-  margin-top: 10px;
+  margin-top: var(--sp-3);
   display: none;
 }
 
@@ -544,12 +551,12 @@ header h1 {
    statt durch Grün - Grün ist für Geld im Plus reserviert. */
 .login-box button {
   width: 100%;
-  margin-top: 16px;
+  margin-top: var(--sp-4);
   background: var(--text);
   color: var(--bg);
   border: none;
-  border-radius: 10px;
-  padding: 11px;
+  border-radius: var(--r-in);
+  padding: var(--sp-3);
   font-weight: 600;
   font-size: var(--fs-md);
 }
