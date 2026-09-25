@@ -34,12 +34,19 @@
     </select>
   </div>
 
-  <section class="overview-tiles" id="overview-tiles"></section>
-  <section class="pnl-block" id="pnl-block"></section>
-  <section class="unrealized-block" id="unrealized-block"></section>
-  <section class="activity-block" id="activity-block"></section>
+  <main>
+    <section class="zone" aria-labelledby="zone-uebersicht">
+      <h2 class="zone-title" id="zone-uebersicht">Übersicht</h2>
+      <div class="block hero-block" id="hero-block"></div>
+      <div class="block" id="unrealized-block"></div>
+      <div class="block" id="activity-block"></div>
+    </section>
 
-  <main class="cards" id="cards"></main>
+    <section class="zone" aria-labelledby="zone-bots">
+      <h2 class="zone-title" id="zone-bots">Bots</h2>
+      <div class="cards" id="cards"></div>
+    </section>
+  </main>
 
   <div id="login-overlay">
     <div class="login-box">
