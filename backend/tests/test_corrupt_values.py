@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.export import build_trades_csv
-from app.ledger_readers import summarize_grid
+from app.ledger_readers import _parse_utc_datetime, summarize_grid
 from app.main import app
 
 client = TestClient(app)
@@ -148,3 +148,118 @@ def test_allocator_non_numeric_fraction_does_not_crash(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["allocator"]["trend_fraction"] is None
+
+
+# --- Randdaten mit Zeitzonen-Offset (App-Check 26.09.2026, Befund 1) -------
+#
+# fromisoformat() liest diese Werte fehlerfrei, erst die Umrechnung nach
+# UTC läuft aus dem datetime-Bereich (Jahr 1 minus 5 Stunden, Jahr 9999
+# plus 5 Stunden) und wirft OverflowError. Vor dem Fix riss das den
+# ganzen /api/status mit - alle vier Bots weg. Erwartet ist dieselbe
+# Regel wie bei jedem anderen unlesbaren Zeitstempel: der WERT wird
+# übersprungen, der Bot bleibt "ok".
+
+JAHR_1_PLUS_5 = "0001-01-01T00:00:00+05:00"
+JAHR_9999_MINUS_5 = "9999-12-31T23:59:59-05:00"
+GUTER_TAG = "2026-01-01T12:00:00+00:00"
+
+
+def _dca_buy(timestamp):
+    return {"timestamp": timestamp, "symbol": "BTCUSDT", "quantity": 0.001,
+            "price": 50000.0, "quote_spent": 50.0, "dry_run": False}
+
+
+def _grid_closed(sold_at, pnl):
+    return {**_grid_open(0), "status": "closed", "bought_at": GUTER_TAG,
+            "sell_price": 110.0, "sold_at": sold_at, "realized_pnl": pnl}
+
+
+def _heartbeat(last_successful_cycle):
+    return {"last_successful_cycle": last_successful_cycle,
+            "last_cycle_attempt": GUTER_TAG, "consecutive_failures": 0}
+
+
+def _check_dca_buy_skipped_in_activity(body):
+    # Beide Käufe bleiben in der DCA-Karte, nur die Tageszählung
+    # ignoriert den unlesbaren.
+    assert body["dca"]["metrics"]["real_trades"] == 2
+    assert body["investment_activity"]["days_with_activity"] == 1
+
+
+def _check_grid_close_skipped_in_history(body):
+    # Der Betrag zählt weiter ins Gesamtergebnis, nur der Verlauf kann
+    # ihn keinem Tag zuordnen und lässt ihn aus.
+    assert body["overview"]["gesamtgewinn"] == pytest.approx(3.0)
+    assert body["pnl_verlauf"] == [
+        {"datum": "2026-01-01", "realisierte_pnl_an_diesem_tag": 1.0,
+         "kumulierte_pnl_bis_zu_diesem_tag": 1.0}
+    ]
+
+
+def _check_heartbeat_treated_as_no_success(body):
+    beat = body["heartbeat"]["dca"]
+    assert beat["status"] == "ok"
+    assert beat["reason"] == "no_confirmed_success"
+    assert beat["seconds_since_success"] is None
+    assert beat["last_successful_cycle"] == JAHR_1_PLUS_5  # Rohwert bleibt sichtbar
+
+
+@pytest.mark.parametrize(
+    "overrides, check",
+    [
+        pytest.param(
+            {"trade_ledger.json": [_dca_buy(JAHR_1_PLUS_5), _dca_buy(GUTER_TAG)]},
+            _check_dca_buy_skipped_in_activity,
+            id="dca-jahr-1",
+        ),
+        pytest.param(
+            {"trade_ledger.json": [_dca_buy(JAHR_9999_MINUS_5), _dca_buy(GUTER_TAG)]},
+            _check_dca_buy_skipped_in_activity,
+            id="dca-jahr-9999",
+        ),
+        pytest.param(
+            {"grid_positions.json": [_grid_closed(JAHR_1_PLUS_5, 2.0),
+                                     _grid_closed(GUTER_TAG, 1.0)]},
+            _check_grid_close_skipped_in_history,
+            id="grid-sold-at-jahr-1",
+        ),
+        pytest.param(
+            {"heartbeat_dca.json": _heartbeat(JAHR_1_PLUS_5)},
+            _check_heartbeat_treated_as_no_success,
+            id="heartbeat-jahr-1",
+        ),
+    ],
+)
+def test_edge_date_with_offset_does_not_crash_status(tmp_path, monkeypatch, overrides, check):
+    _seed(
+        tmp_path,
+        monkeypatch,
+        **{"allocator_state.json": {"trend_fraction": 0.3, "updated_at": GUTER_TAG}},
+        **overrides,
+    )
+
+    response = client.get("/api/status", headers={"X-Dashboard-Token": VALID_TOKEN})
+
+    assert response.status_code == 200
+    body = response.json()
+    # Kein Bot fällt auf "keine Daten" - auch nicht der betroffene.
+    for bot in ("dca", "grid", "trend", "allocator"):
+        assert body[bot]["status"] == "ok", bot
+    check(body)
+
+    # Der Export hat einen eigenen Parser und war nie betroffen - bleibt so.
+    export = client.get("/api/export/trades", headers={"X-Dashboard-Token": VALID_TOKEN},
+                        params={"period": "year"})
+    assert export.status_code == 200
+
+
+@pytest.mark.parametrize("value", [JAHR_1_PLUS_5, JAHR_9999_MINUS_5])
+def test_parse_utc_datetime_returns_none_on_overflow(value):
+    assert _parse_utc_datetime(value) is None
+
+
+def test_parse_utc_datetime_keeps_valid_edge_dates():
+    """Gegenprobe: dieselben Randdaten OHNE Überlauf bleiben lesbar."""
+    assert _parse_utc_datetime("0001-01-01T00:00:00+00:00").year == 1
+    assert _parse_utc_datetime("9999-12-31T23:59:59-00:00").year == 9999
+    assert _parse_utc_datetime("0001-01-01T12:00:00+05:00").hour == 7
