@@ -438,11 +438,12 @@
       return;
     }
 
+    // Farbe und "±0,00" folgen derselben Rundung wie die Ziffern (siehe displayedSign).
     const netto = gewinn + verlust;
-    const gerundet = Math.round(netto * 100) / 100;
-    const richtung = gerundet > 0 ? " pos" : gerundet < 0 ? " neg" : "";
+    const vorzeichen = displayedSign(netto);
+    const richtung = vorzeichen > 0 ? " pos" : vorzeichen < 0 ? " neg" : "";
     block.appendChild(
-      el("div", `value hero-value${richtung}`, gerundet === 0 ? "±0,00 USDT" : fmtSigned(netto))
+      el("div", `value hero-value${richtung}`, vorzeichen === 0 ? "±0,00 USDT" : fmtSigned(netto))
     );
 
     // Nur die Netto-Zahl trägt Farbe; die Aufschlüsselung bleibt grau.
@@ -507,11 +508,24 @@
     return `${String(date.getUTCDate()).padStart(2, "0")}.${String(date.getUTCMonth() + 1).padStart(2, "0")}.`;
   }
 
+  // Richtung eines Betrags so, wie er ANGEZEIGT wird: 1, -1 oder 0.
+  // Bewusst aus den formatierten Ziffern abgeleitet statt über eine
+  // eigene Rundung: Math.round rundet ,5 stets nach oben (Math.round(-0.5)
+  // ist -0), toLocaleString dagegen vom Nullpunkt weg. Mit zwei
+  // Rundungswegen erschien +0,005 als "+0,01" in Grün, −0,005 aber als
+  // "±0,00" ohne Farbe. Aus den Ziffern selbst abgeleitet, können Anzeige,
+  // Vorzeichen und Farbe nicht mehr auseinanderlaufen.
+  function displayedSign(value) {
+    if (!/[1-9]/.test(fmtPrice(Math.abs(value)))) return 0;
+    return value < 0 ? -1 : 1;
+  }
+
   // Null ohne Vorzeichen - "Verlust +0,00" wäre sinnlos.
   function fmtSignedPlain(value) {
     const formatted = fmtPrice(Math.abs(value));
-    if (Math.round(value * 100) === 0) return formatted;
-    return `${value < 0 ? "−" : "+"}${formatted}`;
+    const sign = displayedSign(value);
+    if (sign === 0) return formatted;
+    return `${sign < 0 ? "−" : "+"}${formatted}`;
   }
 
   function fmtSigned(value) {

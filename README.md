@@ -192,9 +192,8 @@ cd backend
 pytest
 ```
 
-Zusätzlich gibt es Browser-Tests für den Login-/Reload-Ablauf des
-Frontends (`tests/test_frontend_login_flow.py`). Die brauchen Playwright
-und überspringen sich sonst automatisch:
+Zusätzlich gibt es Browser-Tests für das Frontend. Die brauchen
+Playwright und überspringen sich sonst automatisch:
 
 ```bash
 pip install -r requirements-dev.txt
@@ -202,9 +201,22 @@ python -m playwright install chromium
 pytest                      # führt die Browser-Tests jetzt mit aus
 ```
 
-Sie starten einen echten uvicorn-Prozess und steuern einen echten
-Browser - die Sichtbarkeit des Login-Overlays hängt an einer CSS-Klasse
-und ist in einem DOM-Stub nicht zuverlässig prüfbar.
+- `tests/test_frontend_login_flow.py` - Login-/Reload-Ablauf und
+  Login-Overlay.
+- `tests/test_frontend_dashboard.py` - Netto-Ergebnis (Summe, Rundung,
+  Farbe, „Noch kein realisiertes Ergebnis"), Positionslisten (drei
+  sichtbar, „+1"-Regel, nach dem Aufklappen jede Position auf der Seite)
+  und das Offenbleiben einer aufgeklappten Liste beim Refresh. Das
+  Netto-Ergebnis wird nur im Frontend berechnet, diese Tests sind seine
+  einzige Absicherung.
+
+Beide steuern einen echten Browser gegen einen echten uvicorn-Prozess
+(Fixtures in `tests/conftest.py`) - Sichtbarkeit hängt an CSS und ist in
+einem DOM-Stub nicht zuverlässig prüfbar. Die Dashboard-Tests fangen
+`/api/status` im Browser ab und liefern die Antwort, die das echte
+Backend für die Ledger-Daten des jeweiligen Tests erzeugt. So braucht
+nicht jeder Fall einen eigenen Server, und die Testdaten können nicht
+unbemerkt vom Backend abweichen.
 
 ## Frontend
 
@@ -229,6 +241,21 @@ Die Seite bringt ein `manifest.json` mit (PWA-light, ohne Service Worker).
 Im mobilen Chrome über das Menü "Zum Startbildschirm hinzufügen" wählen,
 sobald das Dashboard über eine echte URL erreichbar ist (z.B. über den
 Cloudflare Tunnel).
+
+### Bekannte kleinere Verbesserungen
+
+Aus dem App-Check vom 26.09.2026, bewusst noch offen:
+
+- **Farb-Literale statt Tokens** in `style.css`: `#error-banner`,
+  `.activity-caveat` und `#login-overlay` nutzen feste Farbwerte - teils
+  Varianten vorhandener Tokens (`--danger`, `--warn`), teils ohne eigene
+  Variable in `:root`.
+- **Totes `--fs-xl`** (`style.css`, `:root`): definiert, aber nirgends
+  verwendet.
+- **Kastentitel als `div`** (`.block-title` in Karten und Übersichts-Kästen)
+  statt echter Überschriften - Screenreader können nicht zu ihnen springen.
+- **Kein `aria-live`** für Fehlerbanner, Login-Fehler und
+  Verbindungsstatus - Änderungen werden Screenreadern nicht angesagt.
 
 ## Sicherheit
 

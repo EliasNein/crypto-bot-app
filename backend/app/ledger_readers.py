@@ -105,16 +105,22 @@ def _parse_utc_datetime(value: Any) -> datetime | None:
     Ein Eintrag ohne Zeitzone wird als UTC gelesen - der Bot schreibt
     zwar durchgängig '+00:00', aber ein handgepflegter Eintrag ohne
     Offset soll den Tagesschnitt nicht verschieben.
+
+    Die Umrechnung nach UTC steht mit im try: Ein Randdatum mit Offset
+    ('0001-01-01T00:00:00+05:00', '9999-12-31T23:59:59-05:00') parst
+    fehlerfrei, läuft aber bei astimezone aus dem datetime-Bereich und
+    wirft OverflowError. Solche Werte werden übersprungen wie jeder
+    andere unlesbare Zeitstempel.
     """
     if not isinstance(value, str) or not value:
         return None
     try:
         parsed = datetime.fromisoformat(value)
-    except (ValueError, TypeError):
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, TypeError, OverflowError):
         return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
 
 
 def _utc_date(value: Any) -> date | None:
