@@ -36,7 +36,8 @@ def test_summarize_dca_parses_real_and_dry_run_buys(tmp_path):
     assert result["metrics"]["real_trades"] == 2
     assert result["metrics"]["dry_run_trades"] == 1
     assert result["metrics"]["total_quantity"] == pytest.approx(1.5)
-    assert result["metrics"]["total_spent"] == pytest.approx(20.0)
+    assert result["metrics"]["total_spent"] == {"USDT": pytest.approx(20.0)}
+    assert result["metrics"]["unknown_currency"] == 0
     assert len(result["open_positions"]) == 2
     assert result["last_activity"] == "2026-01-03T00:00:00+00:00"
 
@@ -111,9 +112,12 @@ def test_summarize_grid_open_and_closed_positions(tmp_path):
     assert result["status"] == "ok"
     assert result["metrics"]["open_positions"] == 1
     assert result["metrics"]["closed_positions"] == 1
-    assert result["metrics"]["realized_pnl"] == pytest.approx(5.0)
+    assert result["metrics"]["realized_pnl"] == {"USDT": pytest.approx(5.0)}
     assert len(result["open_positions"]) == 1
     assert result["open_positions"][0]["id"] == "a"
+    # Kein symbol-Feld (Altbestand) - gilt als BTCUSDT, wie beim Bot.
+    assert result["open_positions"][0]["symbol"] == "BTCUSDT"
+    assert result["open_positions"][0]["waehrung"] == "USDT"
     assert result["last_activity"] == "2026-01-02T00:00:00+00:00"
 
 
@@ -264,8 +268,8 @@ def test_overview_mixes_real_and_dry_run_only_counts_real(tmp_path):
 
     result = summarize_overview(dca_path, grid_path, trend_path)
 
-    assert result["gesamtgewinn"] == pytest.approx(5.0)
-    assert result["gesamtverlust"] == pytest.approx(-2.0)
+    assert result["gesamtgewinn"] == {"USDT": pytest.approx(5.0)}
+    assert result["gesamtverlust"] == {"USDT": pytest.approx(-2.0)}
 
 
 def test_overview_only_gains_leaves_loss_at_zero(tmp_path):
@@ -279,8 +283,8 @@ def test_overview_only_gains_leaves_loss_at_zero(tmp_path):
 
     result = summarize_overview(dca_path, grid_path, trend_path)
 
-    assert result["gesamtgewinn"] == pytest.approx(10.0)
-    assert result["gesamtverlust"] == pytest.approx(0.0)
+    assert result["gesamtgewinn"] == {"USDT": pytest.approx(10.0)}
+    assert result["gesamtverlust"] == {"USDT": pytest.approx(0.0)}
 
 
 def test_overview_only_losses_leaves_gain_at_zero(tmp_path):
@@ -294,8 +298,8 @@ def test_overview_only_losses_leaves_gain_at_zero(tmp_path):
 
     result = summarize_overview(dca_path, grid_path, trend_path)
 
-    assert result["gesamtgewinn"] == pytest.approx(0.0)
-    assert result["gesamtverlust"] == pytest.approx(-10.0)
+    assert result["gesamtgewinn"] == {"USDT": pytest.approx(0.0)}
+    assert result["gesamtverlust"] == {"USDT": pytest.approx(-10.0)}
 
 
 def test_overview_empty_ledgers_report_zero_holdings_not_none(tmp_path):
@@ -309,14 +313,17 @@ def test_overview_empty_ledgers_report_zero_holdings_not_none(tmp_path):
 
     result = summarize_overview(dca_path, grid_path, trend_path)
 
-    assert result["gesamtgewinn"] == pytest.approx(0.0)
-    assert result["gesamtverlust"] == pytest.approx(0.0)
+    # Nichts realisiert: leere Dicts, keine 0 - "nie gehandelt" ist nicht
+    # "ausgeglichen".
+    assert result["gesamtgewinn"] == {}
+    assert result["gesamtverlust"] == {}
+    assert result["waehrungen"] == []
     unrealized = result["unrealisiert_geschätzt"]
-    # Datei vorhanden und gültig, aber leer: 0 Bestand ist eine echte Aussage,
-    # kein fehlender Wert - deshalb ein Objekt mit quantity 0.0, nicht None.
-    assert unrealized["dca"] == {"quantity": 0.0, "avg_price": None}
-    assert unrealized["grid"] == {"quantity": 0.0, "avg_price": None}
-    assert unrealized["trend"] == {"quantity": 0.0, "avg_price": None}
+    # Datei vorhanden und gültig, aber leer: kein Bestand ist eine echte
+    # Aussage, kein fehlender Wert - deshalb ein leeres Dict, nicht None.
+    assert unrealized["dca"] == {}
+    assert unrealized["grid"] == {}
+    assert unrealized["trend"] == {}
 
 
 def test_overview_missing_file_reports_none_not_zero(tmp_path):
@@ -331,7 +338,7 @@ def test_overview_missing_file_reports_none_not_zero(tmp_path):
 
     # Ein Datenproblem darf nicht wie "0 BTC gehalten" aussehen.
     assert result["unrealisiert_geschätzt"]["grid"] is None
-    assert result["unrealisiert_geschätzt"]["dca"] == {"quantity": 0.0, "avg_price": None}
+    assert result["unrealisiert_geschätzt"]["dca"] == {}
 
 
 def test_overview_dca_unrealized_independent_of_grid_and_trend(tmp_path):
@@ -352,11 +359,12 @@ def test_overview_dca_unrealized_independent_of_grid_and_trend(tmp_path):
     result = summarize_overview(dca_path, grid_path, trend_path)
 
     dca_unrealized = result["unrealisiert_geschätzt"]["dca"]
-    assert dca_unrealized["quantity"] == pytest.approx(0.0002)
-    assert dca_unrealized["avg_price"] == pytest.approx(75000.0)
+    assert set(dca_unrealized) == {"USDT"}
+    assert dca_unrealized["USDT"]["quantity"] == pytest.approx(0.0002)
+    assert dca_unrealized["USDT"]["avg_price"] == pytest.approx(75000.0)
     # Kein berechneter unrealisierter Gewinn/Verlust im Ergebnis.
-    assert "unrealized_pnl" not in dca_unrealized
-    assert set(dca_unrealized.keys()) == {"quantity", "avg_price"}
+    assert "unrealized_pnl" not in dca_unrealized["USDT"]
+    assert set(dca_unrealized["USDT"].keys()) == {"quantity", "avg_price"}
 
 
 def test_overview_ignores_open_positions_for_realized_pnl(tmp_path):
@@ -388,10 +396,10 @@ def test_overview_ignores_open_positions_for_realized_pnl(tmp_path):
 
     result = summarize_overview(dca_path, grid_path, trend_path)
 
-    assert result["gesamtgewinn"] == pytest.approx(0.0)
-    assert result["gesamtverlust"] == pytest.approx(0.0)
+    assert result["gesamtgewinn"] == {}
+    assert result["gesamtverlust"] == {}
     # Die offene, echte Position zählt stattdessen zum unrealisierten Bestand.
-    assert result["unrealisiert_geschätzt"]["grid"] == {"quantity": 1.0, "avg_price": 100.0}
+    assert result["unrealisiert_geschätzt"]["grid"] == {"USDT": {"quantity": 1.0, "avg_price": 100.0}}
 
 
 # --- Dry-Run darf nie in eine Geldsumme einfließen -------------------------
@@ -406,7 +414,7 @@ def test_grid_card_realized_pnl_excludes_dry_run(tmp_path):
 
     result = summarize_grid(path)
 
-    assert result["metrics"]["realized_pnl"] == pytest.approx(5.0)
+    assert result["metrics"]["realized_pnl"] == {"USDT": pytest.approx(5.0)}
 
 
 def test_trend_card_realized_pnl_excludes_dry_run(tmp_path):
@@ -415,7 +423,7 @@ def test_trend_card_realized_pnl_excludes_dry_run(tmp_path):
 
     result = summarize_trend(path)
 
-    assert result["metrics"]["realized_pnl"] == pytest.approx(-2.0)
+    assert result["metrics"]["realized_pnl"] == {"USDT": pytest.approx(-2.0)}
 
 
 def test_card_and_overview_agree_on_the_same_ledger(tmp_path):
@@ -440,4 +448,4 @@ def test_dry_run_only_closed_positions_yield_no_realized_pnl(tmp_path):
     path = tmp_path / "grid_positions.json"
     _write(path, [_grid_closed(realized_pnl=42.0, dry_run=True)])
 
-    assert summarize_grid(path)["metrics"]["realized_pnl"] is None
+    assert summarize_grid(path)["metrics"]["realized_pnl"] == {}

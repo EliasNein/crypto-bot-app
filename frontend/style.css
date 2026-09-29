@@ -249,6 +249,12 @@ main {
   margin-top: var(--sp-3);
 }
 
+/* Einträge ohne bestimmbare Währung fehlen in der Zahl darüber - ein
+   Hinweis, also Amber wie in der Karten-Fußzeile. */
+.hero-meta.warn {
+  color: var(--warn);
+}
+
 .value.pos { color: var(--accent); }
 .value.neg { color: var(--danger); }
 

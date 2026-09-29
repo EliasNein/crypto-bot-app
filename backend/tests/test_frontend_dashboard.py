@@ -37,10 +37,10 @@ REFRESH_INTERVAL_MS = 45_000  # wie in app.js
 # --- Ledger-Daten ------------------------------------------------------------
 
 
-def _dca_buy(i: int, dry_run: bool = False) -> dict:
+def _dca_buy(i: int, dry_run: bool = False, symbol: str = "BTCUSDT") -> dict:
     # Eindeutiger Preis je Kauf (70.001, 70.002, ...), damit jede Zeile auf
     # der Seite einem Ledger-Eintrag zugeordnet werden kann.
-    return {"timestamp": f"2026-09-{i:02d}T09:00:00+00:00", "symbol": "BTCUSDT",
+    return {"timestamp": f"2026-09-{i:02d}T09:00:00+00:00", "symbol": symbol,
             "quote_spent": 15.0, "quantity": 0.0002, "price": 70000.0 + i, "dry_run": dry_run}
 
 
@@ -51,16 +51,27 @@ def _grid_open(i: int) -> dict:
             "sell_price": None, "sold_at": None, "realized_pnl": None}
 
 
-def _grid_closed(i: int, pnl: float, dry_run: bool = False) -> dict:
+def _grid_closed(i: int, pnl: float, dry_run: bool = False, symbol: str | None = None) -> dict:
     # Ein Abschluss je Tag, damit der Verlauf mehrere Punkte hat.
-    return {"id": f"zu-{i}", "level_index": i, "buy_price": 100.0, "target_sell_price": 105.0,
-            "quantity": 0.0002, "quote_spent": 15.0, "bought_at": f"2026-09-{i:02d}T10:00:00+00:00",
-            "dry_run": dry_run, "status": "closed", "sell_price": 100.0 + pnl,
-            "sold_at": f"2026-09-{i:02d}T15:00:00+00:00", "realized_pnl": pnl}
+    # symbol=None: Feld fehlt - Altbestand vor der Symbolbindung, gilt als BTCUSDT.
+    record = {"id": f"zu-{i}", "level_index": i, "buy_price": 100.0, "target_sell_price": 105.0,
+              "quantity": 0.0002, "quote_spent": 15.0, "bought_at": f"2026-09-{i:02d}T10:00:00+00:00",
+              "dry_run": dry_run, "status": "closed", "sell_price": 100.0 + pnl,
+              "sold_at": f"2026-09-{i:02d}T15:00:00+00:00", "realized_pnl": pnl}
+    return record if symbol is None else {**record, "symbol": symbol}
 
 
-def _closes(*pnls: float) -> list[dict]:
-    return [_grid_closed(i + 1, pnl) for i, pnl in enumerate(pnls)]
+def _closes(*pnls: float, symbol: str | None = None, start: int = 1) -> list[dict]:
+    return [_grid_closed(start + i, pnl, symbol=symbol) for i, pnl in enumerate(pnls)]
+
+
+# Jeder Fall einmal mit Altbestand (kein symbol-Feld -> USDT) und einmal mit
+# BTCEUR: Die Einheit auf der Seite muss aus den Daten kommen. Ein fest
+# eingetragenes "USDT" fiele im EUR-Fall auf.
+WAEHRUNGEN = [
+    pytest.param(None, "USDT", id="altbestand-usdt"),
+    pytest.param("BTCEUR", "EUR", id="btceur"),
+]
 
 
 def _status_payload(tmp_path, monkeypatch, **files) -> dict:
@@ -125,12 +136,44 @@ def _hero(page) -> dict:
                 breakdown: breakdown ? breakdown.textContent : null,
                 empty: block.querySelector('.hero-empty')?.textContent ?? null,
                 meta: block.querySelector('.hero-meta')?.textContent ?? null,
+                metas: [...block.querySelectorAll('.hero-meta')].map((m) => ({
+                    text: m.textContent, color: getComputedStyle(m).color,
+                })),
                 hasChart: !!block.querySelector('.pnl-chart'),
+                chartLabel: block.querySelector('.pnl-chart')?.getAttribute('aria-label') ?? null,
                 green: resolve('--accent'),
                 red: resolve('--danger'),
                 plain: resolve('--text'),
+                amber: resolve('--warn'),
             };
         }"""
+    )
+
+
+def _metric(page, title: str, label: str) -> list[dict]:
+    """Die Werte einer Kennzahl auf einer Karte - je Währung eine Zeile."""
+    return page.evaluate(
+        """([title, label]) => {
+            const card = [...document.querySelectorAll('#cards .card')]
+                .find((c) => c.querySelector('.card-header .block-title').textContent === title);
+            const metric = [...card.querySelectorAll('.metric')]
+                .find((m) => m.querySelector('.field-label').textContent === label);
+            return [...metric.querySelectorAll('.value')]
+                .map((v) => ({text: v.textContent, classes: [...v.classList]}));
+        }""",
+        [title, label],
+    )
+
+
+def _footer_warnings(page, title: str) -> list[dict]:
+    return page.evaluate(
+        """(title) => {
+            const card = [...document.querySelectorAll('#cards .card')]
+                .find((c) => c.querySelector('.card-header .block-title').textContent === title);
+            return [...card.querySelectorAll('.card-footer .warn')]
+                .map((w) => ({text: w.textContent, color: getComputedStyle(w).color}));
+        }""",
+        title,
     )
 
 
@@ -175,38 +218,40 @@ def _toggle(page, title: str) -> None:
 # --- Netto-Ergebnis ------------------------------------------------------------
 
 
+@pytest.mark.parametrize("symbol, waehrung", WAEHRUNGEN)
 @pytest.mark.parametrize(
     "closes, value, direction, breakdown",
     [
         pytest.param(
             (2.40, 1.10, -5.80, -1.20, 3.75, 2.90),
-            "+3,15 USDT", "pos", "Gewinn +10,15 · Verlust −7,00 USDT",
+            "+3,15 {w}", "pos", "Gewinn +10,15 · Verlust −7,00 {w}",
             id="netto-positiv",
         ),
         pytest.param(
             (1.00, -4.25),
-            "−3,25 USDT", "neg", "Gewinn +1,00 · Verlust −4,25 USDT",
+            "−3,25 {w}", "neg", "Gewinn +1,00 · Verlust −4,25 {w}",
             id="netto-negativ",
         ),
         pytest.param(
             (5.00, -5.00),
-            "±0,00 USDT", None, "Gewinn +5,00 · Verlust −5,00 USDT",
+            "±0,00 {w}", None, "Gewinn +5,00 · Verlust −5,00 {w}",
             id="netto-exakt-null",
         ),
     ],
 )
 def test_net_result_is_sum_of_gain_and_loss(page, server, tmp_path, monkeypatch,
-                                            closes, value, direction, breakdown):
+                                            closes, value, direction, breakdown, symbol, waehrung):
     # Ein Dry-Run-Abschluss mit großem Gewinn darf nirgends einfließen.
     payload = _status_payload(
         tmp_path, monkeypatch,
-        **{"grid_positions.json": _closes(*closes) + [_grid_closed(28, 999.0, dry_run=True)]},
+        **{"grid_positions.json": _closes(*closes, symbol=symbol)
+           + [_grid_closed(28, 999.0, dry_run=True, symbol=symbol)]},
     )
     _open_dashboard(page, server, payload)
     hero = _hero(page)
 
-    assert hero["value"] == value
-    assert hero["breakdown"] == breakdown
+    assert hero["value"] == value.format(w=waehrung)
+    assert hero["breakdown"] == breakdown.format(w=waehrung)
     assert "999" not in hero["text"]
     assert hero["hasChart"], "mehrere Abschlusstage, aber kein Verlauf"
     _assert_direction(hero, direction)
@@ -226,29 +271,30 @@ def _assert_direction(hero: dict, direction: str | None) -> None:
         assert hero["color"] == hero["plain"], "±0,00 darf keine Gewinn-/Verlustfarbe tragen"
 
 
+@pytest.mark.parametrize("symbol, waehrung", WAEHRUNGEN)
 @pytest.mark.parametrize(
     "pnl, value, direction, breakdown",
     [
-        pytest.param(0.004, "±0,00 USDT", None, "Gewinn 0,00 · Verlust 0,00 USDT", id="plus-0,004"),
-        pytest.param(-0.004, "±0,00 USDT", None, "Gewinn 0,00 · Verlust 0,00 USDT", id="minus-0,004"),
+        pytest.param(0.004, "±0,00 {w}", None, "Gewinn 0,00 · Verlust 0,00 {w}", id="plus-0,004"),
+        pytest.param(-0.004, "±0,00 {w}", None, "Gewinn 0,00 · Verlust 0,00 {w}", id="minus-0,004"),
         # Der frühere Fehler: +0,005 erschien als "+0,01" in Grün, −0,005 als
         # "±0,00" ohne Farbe (und "Verlust 0,01" ohne Minuszeichen).
-        pytest.param(0.005, "+0,01 USDT", "pos", "Gewinn +0,01 · Verlust 0,00 USDT", id="plus-0,005"),
-        pytest.param(-0.005, "−0,01 USDT", "neg", "Gewinn 0,00 · Verlust −0,01 USDT", id="minus-0,005"),
-        pytest.param(1.345, "+1,35 USDT", "pos", "Gewinn +1,35 · Verlust 0,00 USDT", id="plus-1,345"),
-        pytest.param(-1.345, "−1,35 USDT", "neg", "Gewinn 0,00 · Verlust −1,35 USDT", id="minus-1,345"),
+        pytest.param(0.005, "+0,01 {w}", "pos", "Gewinn +0,01 · Verlust 0,00 {w}", id="plus-0,005"),
+        pytest.param(-0.005, "−0,01 {w}", "neg", "Gewinn 0,00 · Verlust −0,01 {w}", id="minus-0,005"),
+        pytest.param(1.345, "+1,35 {w}", "pos", "Gewinn +1,35 · Verlust 0,00 {w}", id="plus-1,345"),
+        pytest.param(-1.345, "−1,35 {w}", "neg", "Gewinn 0,00 · Verlust −1,35 {w}", id="minus-1,345"),
     ],
 )
 def test_net_result_rounding_is_symmetric(page, server, tmp_path, monkeypatch,
-                                          pnl, value, direction, breakdown):
+                                          pnl, value, direction, breakdown, symbol, waehrung):
     """Ziffern, Vorzeichen und Farbe folgen derselben Rundung - für Gewinn
     und Verlust gleich."""
-    payload = _status_payload(tmp_path, monkeypatch, **{"grid_positions.json": _closes(pnl)})
+    payload = _status_payload(tmp_path, monkeypatch, **{"grid_positions.json": _closes(pnl, symbol=symbol)})
     _open_dashboard(page, server, payload)
     hero = _hero(page)
 
-    assert hero["value"] == value
-    assert hero["breakdown"] == breakdown
+    assert hero["value"] == value.format(w=waehrung)
+    assert hero["breakdown"] == breakdown.format(w=waehrung)
     _assert_direction(hero, direction)
 
 
@@ -272,17 +318,112 @@ def test_without_real_trades_no_result_is_claimed(page, server, tmp_path, monkey
     assert not hero["hasChart"]
 
 
-def test_single_close_shows_number_without_chart(page, server, tmp_path, monkeypatch):
-    payload = _status_payload(tmp_path, monkeypatch, **{"grid_positions.json": _closes(0.62)})
+@pytest.mark.parametrize("symbol, waehrung", WAEHRUNGEN)
+def test_single_close_shows_number_without_chart(page, server, tmp_path, monkeypatch, symbol, waehrung):
+    payload = _status_payload(tmp_path, monkeypatch, **{"grid_positions.json": _closes(0.62, symbol=symbol)})
     _open_dashboard(page, server, payload)
     hero = _hero(page)
 
-    assert hero["value"] == "+0,62 USDT"
+    assert hero["value"] == f"+0,62 {waehrung}"
     # Verlust als "0,00", nicht als "+0,00" oder "−0,00".
-    assert hero["breakdown"] == "Gewinn +0,62 · Verlust 0,00 USDT"
+    assert hero["breakdown"] == f"Gewinn +0,62 · Verlust 0,00 {waehrung}"
     assert hero["meta"] == "Bisher ein einziger Abschlusstag: 01.09."
     assert not hero["hasChart"]
     _assert_direction(hero, "pos")
+
+
+# --- Mehrere Währungen (Paarwechsel BTCUSDT -> BTCEUR) ---------------------------
+
+
+def test_eur_only_page_never_mentions_usdt(page, server, tmp_path, monkeypatch):
+    """Die Einheit kommt aus den Daten. Früher stand "USDT" an acht Stellen
+    fest im Code - bei einem EUR-Paar wäre jede davon falsch gewesen."""
+    payload = _status_payload(
+        tmp_path, monkeypatch,
+        **{
+            "trade_ledger.json": [_dca_buy(i, symbol="BTCEUR") for i in (1, 2)],
+            "grid_positions.json": _closes(1.10, -0.40, symbol="BTCEUR", start=3)
+            + [{**_grid_open(1), "symbol": "BTCEUR"}],
+        },
+    )
+    _open_dashboard(page, server, payload)
+
+    assert "USDT" not in page.evaluate("() => document.body.innerText")
+    assert _hero(page)["value"] == "+0,70 EUR"
+    assert [v["text"] for v in _metric(page, "DCA-Bot", "Eingesetzt")] == ["30,00 EUR"]
+    assert [v["text"] for v in _metric(page, "Trend-Bot", "Realisiert")] == ["– EUR"]
+    assert "BTCEUR · 70.002,00 EUR · 0,00020000" in _card(page, "DCA-Bot")["all"]
+    assert "EUR Einstandspreis" in page.inner_text("#unrealized-block")
+
+
+def test_mixed_currencies_are_shown_separately_never_added(page, server, tmp_path, monkeypatch):
+    """Vor dem Wechsel +4,00 USDT, danach −1,75 EUR. Die Summe +2,25 wäre
+    eine Zahl in keiner Währung - sie darf nirgends erscheinen."""
+    payload = _status_payload(
+        tmp_path, monkeypatch,
+        **{"grid_positions.json": _closes(2.50, 1.50) + _closes(-3.00, 1.25, symbol="BTCEUR", start=10)},
+    )
+    _open_dashboard(page, server, payload)
+    hero = _hero(page)
+
+    # Groß: die Hauptwährung, die mit der jüngsten Aktivität.
+    assert hero["value"] == "−1,75 EUR"
+    assert hero["breakdown"] == "Gewinn +1,25 · Verlust −3,00 EUR"
+    _assert_direction(hero, "neg")
+    # Klein darunter und grau: das ältere Ergebnis, eigenständig.
+    assert [m["text"] for m in hero["metas"]] == ["zusätzlich +4,00 USDT aus der Zeit vor dem Wechsel"]
+    assert hero["metas"][0]["color"] != hero["amber"]
+    for blinde_summe in ("2,25", "5,25"):
+        assert blinde_summe not in hero["text"]
+    # Das Diagramm zeigt nur die Hauptwährung.
+    assert hero["hasChart"]
+    assert hero["chartLabel"].endswith("zuletzt −1,75 EUR")
+
+    realisiert = _metric(page, "Grid-Bot", "Realisiert")
+    assert [v["text"] for v in realisiert] == ["-1,75 EUR", "4,00 USDT"]
+    assert ["neg" in v["classes"] for v in realisiert] == [True, False]
+    assert ["pos" in v["classes"] for v in realisiert] == [False, True]
+
+
+def test_new_currency_without_result_shows_its_own_empty_state(page, server, tmp_path, monkeypatch):
+    """Direkt nach dem Wechsel: in EUR nur gekauft, noch nichts geschlossen.
+    Groß steht das - nicht das alte USDT-Ergebnis."""
+    payload = _status_payload(
+        tmp_path, monkeypatch,
+        **{
+            "grid_positions.json": _closes(0.80),
+            "trade_ledger.json": [_dca_buy(5, symbol="BTCEUR")],
+        },
+    )
+    _open_dashboard(page, server, payload)
+    hero = _hero(page)
+
+    assert hero["empty"] == "Noch kein realisiertes Ergebnis in EUR"
+    assert hero["value"] is None
+    assert not hero["hasChart"]
+    assert [m["text"] for m in hero["metas"]] == ["zusätzlich +0,80 USDT aus der Zeit vor dem Wechsel"]
+    assert [v["text"] for v in _metric(page, "DCA-Bot", "Eingesetzt")] == ["15,00 EUR"]
+
+
+def test_undeterminable_currency_is_reported_and_not_counted(page, server, tmp_path, monkeypatch):
+    """Sicherheitsnetz: ein Abschluss mit fremdem Paar fließt in keine Zahl
+    ein - und genau das steht in Amber daneben."""
+    payload = _status_payload(
+        tmp_path, monkeypatch,
+        **{"grid_positions.json": _closes(1.00) + [_grid_closed(2, 50.0, symbol="ETHEUR")]},
+    )
+    _open_dashboard(page, server, payload)
+    hero = _hero(page)
+
+    assert hero["value"] == "+1,00 USDT"
+    assert "51" not in hero["text"] and "50,00" not in hero["text"]
+    hinweis = "⚠ 1 Eintrag ohne bestimmbare Währung, in keiner Summe enthalten"
+    assert hero["metas"][-1] == {"text": hinweis, "color": hero["amber"]}
+    assert sum(hinweis in m["text"] for m in hero["metas"]) == 1
+
+    assert [v["text"] for v in _metric(page, "Grid-Bot", "Realisiert")] == ["1,00 USDT"]
+    assert [w["text"] for w in _footer_warnings(page, "Grid-Bot")] == [hinweis]
+    assert _footer_warnings(page, "Grid-Bot")[0]["color"] == hero["amber"]
 
 
 # --- Positionslisten -------------------------------------------------------------

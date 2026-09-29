@@ -11,6 +11,11 @@ Die Feldnamen (buy_price, target_sell_price, entry_price, trend_fraction,
 ...) folgen dem tatsächlichen Ledger-Format des Bots, wie es in
 dca_bot/audit_positions.py und dca_bot/allocator.py zu sehen ist - dieses
 Modul liest diese Struktur nur nach, importiert aber keinen Code von dort.
+
+Geldbeträge werden nie über Währungsgrenzen addiert: Jede Summe ist ein
+Dict {währung: wert}, die Zuordnung eines Eintrags kommt aus currency.py.
+Echte Einträge mit unbestimmbarer Währung fließen in keine Summe ein und
+werden stattdessen gezählt (unknown_currency / ohne_waehrung).
 """
 
 from __future__ import annotations
@@ -19,6 +24,8 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from .currency import currency_of, resolve
 
 
 def _load_json(path: Path, expected_type: type) -> tuple[Any, str | None]:
@@ -74,19 +81,47 @@ def _int_or(value: Any, default: int) -> int:
         return default
 
 
-def _realized_pnl_sum(closed_records: list[dict]) -> float | None:
-    """Summe der realisierten PnL über geschlossene, ECHTE Positionen.
+def _by_currency(records: list[dict]) -> dict[str, list[dict]]:
+    """Records nach Währung gruppiert. Unbestimmbare fehlen hier bewusst -
+    lieber nicht mitzählen als raten (siehe currency.resolve)."""
+    groups: dict[str, list[dict]] = {}
+    for r in records:
+        currency = currency_of(r)
+        if currency is not None:
+            groups.setdefault(currency, []).append(r)
+    return groups
+
+
+def _unknown_currency_count(records: list[dict]) -> int:
+    """Echte Einträge ohne bestimmbare Währung - sie fehlen in jeder Summe,
+    und genau das muss sichtbar sein. Dry-Run zählt nicht: der flösse
+    ohnehin in keine Summe ein."""
+    return sum(1 for r in records if r.get("dry_run") is False and currency_of(r) is None)
+
+
+def _with_currency(position: dict, record: dict) -> dict:
+    """Positions-Eintrag für die API, ergänzt um Symbol und Währung."""
+    symbol, currency = resolve(record)
+    return {**position, "symbol": symbol, "waehrung": currency}
+
+
+def _realized_pnl_sum(closed_records: list[dict]) -> dict[str, float]:
+    """Summe der realisierten PnL über geschlossene, ECHTE Positionen, je
+    Währung. Leeres Dict: nichts Echtes mit PnL abgeschlossen.
 
     Dry-Run-Einträge bleiben draußen - sonst stünde ein simulierter
     Gewinn in der Bot-Karte direkt neben dem echten in der
     Gesamtgewinn-Kachel (die schon immer filtert), und beide Zahlen auf
     demselben Bildschirm widersprächen sich.
     """
-    values = [
-        _num(r.get("realized_pnl"), default=None) for r in closed_records if r.get("dry_run") is False
-    ]
-    values = [v for v in values if v is not None]
-    return sum(values) if values else None
+    sums: dict[str, float] = {}
+    real = [r for r in closed_records if r.get("dry_run") is False]
+    for currency, records in _by_currency(real).items():
+        values = [_num(r.get("realized_pnl"), default=None) for r in records]
+        values = [v for v in values if v is not None]
+        if values:
+            sums[currency] = sum(values)
+    return sums
 
 
 def _latest(values: list[Any]) -> str | None:
@@ -132,11 +167,20 @@ def _cost_basis(records: list[dict]) -> dict:
     """Menge und durchschnittlicher Einstandspreis (quote_spent / quantity)
     über die übergebenen Records - ohne jeden aktuellen Kurs, also ohne
     Aussage über einen unrealisierten Gewinn/Verlust.
+
+    Die Records müssen alle dieselbe Währung haben - sonst ist der
+    Durchschnitt ein Kurs, den es in keiner Währung gab. Aufrufer mit
+    gemischten Daten nehmen _cost_basis_by_currency.
     """
     quantity = sum(_num(r.get("quantity")) or 0.0 for r in records)
     spent = sum(_num(r.get("quote_spent")) or 0.0 for r in records)
     avg_price = (spent / quantity) if quantity else None
     return {"quantity": quantity, "avg_price": avg_price}
+
+
+def _cost_basis_by_currency(records: list[dict]) -> dict[str, dict]:
+    """_cost_basis je Währung. Leeres Dict: kein Bestand."""
+    return {currency: _cost_basis(group) for currency, group in _by_currency(records).items()}
 
 
 def summarize_dca(path: Path) -> dict:
@@ -145,6 +189,10 @@ def summarize_dca(path: Path) -> dict:
     Jeder echte (nicht Dry-Run-) Kauf ist damit dauerhaft Bestand - siehe
     audit_positions.py:dca_claim(). Genau diese Käufe werden hier als
     "offene Positionen" gezeigt.
+
+    Die BTC-Menge ist währungsunabhängig und bleibt eine Summe - aber nur
+    über Käufe mit bestimmbarer Währung: ein unbekanntes Paar hat nicht
+    zwingend BTC als Basis.
     """
     records, error = _load_list(path)
     if error:
@@ -153,19 +201,27 @@ def summarize_dca(path: Path) -> dict:
     real = [r for r in records if r.get("dry_run") is False]
     dry_run_count = sum(1 for r in records if r.get("dry_run") is True)
 
-    basis = _cost_basis(real)
-    total_quantity = basis["quantity"]
-    total_spent = sum(_num(r.get("quote_spent")) or 0.0 for r in real)
-    avg_price = basis["avg_price"]
+    groups = _by_currency(real)
+    total_quantity = sum(_cost_basis(group)["quantity"] for group in groups.values())
+    total_spent = {
+        currency: sum(_num(r.get("quote_spent")) or 0.0 for r in group) for currency, group in groups.items()
+    }
+    avg_price = {
+        currency: basis["avg_price"]
+        for currency, basis in _cost_basis_by_currency(real).items()
+        if basis["avg_price"] is not None
+    }
 
     open_positions = [
-        {
-            "symbol": r.get("symbol"),
-            "price": r.get("price"),
-            "quantity": r.get("quantity"),
-            "quote_spent": r.get("quote_spent"),
-            "timestamp": r.get("timestamp"),
-        }
+        _with_currency(
+            {
+                "price": r.get("price"),
+                "quantity": r.get("quantity"),
+                "quote_spent": r.get("quote_spent"),
+                "timestamp": r.get("timestamp"),
+            },
+            r,
+        )
         for r in real
     ]
 
@@ -180,6 +236,7 @@ def summarize_dca(path: Path) -> dict:
             "total_quantity": total_quantity,
             "total_spent": total_spent,
             "avg_entry_price": avg_price,
+            "unknown_currency": _unknown_currency_count(records),
         },
     }
 
@@ -196,16 +253,19 @@ def summarize_grid(path: Path) -> dict:
     realized_pnl = _realized_pnl_sum(closed_records)
 
     open_positions = [
-        {
-            "id": r.get("id"),
-            "level_index": r.get("level_index"),
-            "buy_price": r.get("buy_price"),
-            "target_sell_price": r.get("target_sell_price"),
-            "quantity": r.get("quantity"),
-            "quote_spent": r.get("quote_spent"),
-            "bought_at": r.get("bought_at"),
-            "dry_run": r.get("dry_run"),
-        }
+        _with_currency(
+            {
+                "id": r.get("id"),
+                "level_index": r.get("level_index"),
+                "buy_price": r.get("buy_price"),
+                "target_sell_price": r.get("target_sell_price"),
+                "quantity": r.get("quantity"),
+                "quote_spent": r.get("quote_spent"),
+                "bought_at": r.get("bought_at"),
+                "dry_run": r.get("dry_run"),
+            },
+            r,
+        )
         for r in sorted(open_records, key=lambda r: _int_or(r.get("level_index"), -1))
     ]
 
@@ -218,6 +278,7 @@ def summarize_grid(path: Path) -> dict:
             "open_positions": len(open_records),
             "closed_positions": len(closed_records),
             "realized_pnl": realized_pnl,
+            "unknown_currency": _unknown_currency_count(records),
         },
     }
 
@@ -234,15 +295,18 @@ def summarize_trend(path: Path) -> dict:
     realized_pnl = _realized_pnl_sum(closed_records)
 
     open_positions = [
-        {
-            "id": r.get("id"),
-            "entry_price": r.get("entry_price"),
-            "entry_time": r.get("entry_time"),
-            "quantity": r.get("quantity"),
-            "quote_spent": r.get("quote_spent"),
-            "dry_run": r.get("dry_run"),
-            "stop_loss_order_id": r.get("stop_loss_order_id"),
-        }
+        _with_currency(
+            {
+                "id": r.get("id"),
+                "entry_price": r.get("entry_price"),
+                "entry_time": r.get("entry_time"),
+                "quantity": r.get("quantity"),
+                "quote_spent": r.get("quote_spent"),
+                "dry_run": r.get("dry_run"),
+                "stop_loss_order_id": r.get("stop_loss_order_id"),
+            },
+            r,
+        )
         for r in open_records
     ]
 
@@ -255,6 +319,7 @@ def summarize_trend(path: Path) -> dict:
             "open_trades": len(open_records),
             "closed_trades": len(closed_records),
             "realized_pnl": realized_pnl,
+            "unknown_currency": _unknown_currency_count(records),
         },
     }
 
@@ -285,62 +350,115 @@ def summarize_allocator(path: Path) -> dict:
     }
 
 
-def _realized_pnl_totals(records: list[dict]) -> tuple[float, float]:
-    """Summe positiver bzw. negativer realized_pnl-Werte aus geschlossenen,
-    ECHTEN (dry_run=False) Positionen.
+def _realized_pnl_totals(records: list[dict]) -> dict[str, tuple[float, float]]:
+    """Je Währung: Summe positiver bzw. negativer realized_pnl-Werte aus
+    geschlossenen, ECHTEN (dry_run=False) Positionen.
 
     Dry-Run-Positionen fließen bewusst nicht ein: sie existierten nie an
     der Börse, ein simulierter Gewinn/Verlust wäre neben einem echten
     schlicht Fantasie.
+
+    Eine Währung taucht auf, sobald sie EINEN Abschluss mit PnL hat -
+    auch bei PnL genau 0. Ein leeres Ergebnis heißt damit eindeutig "noch
+    nichts realisiert", nicht "ausgeglichen".
     """
-    gain = 0.0
-    loss = 0.0
+    totals: dict[str, tuple[float, float]] = {}
     for r in records:
         if r.get("status") == "open" or r.get("dry_run") is not False:
             continue
         pnl = _num(r.get("realized_pnl"), default=None)
-        if pnl is None:
+        currency = currency_of(r)
+        if pnl is None or currency is None:
             continue
+        gain, loss = totals.get(currency, (0.0, 0.0))
         if pnl > 0:
             gain += pnl
         elif pnl < 0:
             loss += pnl
-    return gain, loss
+        totals[currency] = (gain, loss)
+    return totals
+
+
+# Welche Felder bei welchem Bot einen Zeitpunkt echter Aktivität tragen -
+# Kauf und (bei Grid/Trend) Verkauf.
+_ACTIVITY_TIME_FIELDS = {"dca": ("timestamp",), "grid": ("bought_at", "sold_at"), "trend": ("entry_time", "exit_time")}
+
+
+def _currencies_by_recent_activity(records_by_bot: dict[str, list[dict]]) -> list[str]:
+    """Alle Währungen mit mindestens einem echten Eintrag, die mit der
+    jüngsten Aktivität zuerst.
+
+    Das Frontend zeigt die erste davon groß als Hauptwährung - nach einem
+    Paarwechsel ist das die neue, ältere Bestände stehen darunter. Eine
+    Währung, deren Einträge keinen lesbaren Zeitstempel haben, kommt ans
+    Ende; bei Gleichstand entscheidet das Alphabet (stabile Ausgabe).
+    """
+    latest: dict[str, datetime | None] = {}
+    for bot, fields in _ACTIVITY_TIME_FIELDS.items():
+        for r in records_by_bot.get(bot, []):
+            currency = currency_of(r)
+            if r.get("dry_run") is not False or currency is None:
+                continue
+            times = [t for t in (_parse_utc_datetime(r.get(f)) for f in fields) if t is not None]
+            times += [latest[currency]] if latest.get(currency) else []
+            latest[currency] = max(times) if times else None
+
+    def newest_first(currency: str) -> tuple:
+        when = latest[currency]
+        return (when is None, -when.timestamp() if when else 0.0, currency)
+
+    return sorted(latest, key=newest_first)
 
 
 def summarize_overview(dca_path: Path, grid_path: Path, trend_path: Path) -> dict:
     """Bot-übergreifende Kennzahlen: realisierter Gewinn/Verlust (nur echte,
     geschlossene Grid-/Trend-Positionen) sowie eine grobe, kursfreie
-    Schätzung des unrealisierten Bestands je Bot.
+    Schätzung des unrealisierten Bestands je Bot - alles je Währung.
 
     Bewusst KEIN berechneter unrealisierter Gewinn/Verlust: dafür fehlt
     dem Backend der aktuelle Kurs (kein Binance-Zugriff), und ein Wert
     mit geratenem/veraltetem Kurs wäre irreführender als gar keiner.
+
+    `gesamtgewinn` und `gesamtverlust` haben immer dieselben Schlüssel.
+    `waehrungen` gibt die Reihenfolge vor (jüngste Aktivität zuerst),
+    `ohne_waehrung` zählt echte Einträge, die in keiner Summe stehen.
     """
     dca_records, dca_error = _load_list(dca_path)
     grid_records, grid_error = _load_list(grid_path)
     trend_records, trend_error = _load_list(trend_path)
 
-    gesamtgewinn = 0.0
-    gesamtverlust = 0.0
+    gesamtgewinn: dict[str, float] = {}
+    gesamtverlust: dict[str, float] = {}
     for records, error in ((grid_records, grid_error), (trend_records, trend_error)):
         if error:
             continue
-        gain, loss = _realized_pnl_totals(records)
-        gesamtgewinn += gain
-        gesamtverlust += loss
+        for currency, (gain, loss) in _realized_pnl_totals(records).items():
+            gesamtgewinn[currency] = gesamtgewinn.get(currency, 0.0) + gain
+            gesamtverlust[currency] = gesamtverlust.get(currency, 0.0) + loss
 
-    dca_unrealized = None if dca_error else _cost_basis([r for r in dca_records if r.get("dry_run") is False])
+    dca_unrealized = (
+        None if dca_error else _cost_basis_by_currency([r for r in dca_records if r.get("dry_run") is False])
+    )
     grid_unrealized = (
         None
         if grid_error
-        else _cost_basis([r for r in grid_records if r.get("status") == "open" and r.get("dry_run") is False])
+        else _cost_basis_by_currency(
+            [r for r in grid_records if r.get("status") == "open" and r.get("dry_run") is False]
+        )
     )
     trend_unrealized = (
         None
         if trend_error
-        else _cost_basis([r for r in trend_records if r.get("status") == "open" and r.get("dry_run") is False])
+        else _cost_basis_by_currency(
+            [r for r in trend_records if r.get("status") == "open" and r.get("dry_run") is False]
+        )
     )
+
+    records_by_bot = {
+        "dca": [] if dca_error else dca_records,
+        "grid": [] if grid_error else grid_records,
+        "trend": [] if trend_error else trend_records,
+    }
 
     return {
         "gesamtgewinn": gesamtgewinn,
@@ -351,6 +469,8 @@ def summarize_overview(dca_path: Path, grid_path: Path, trend_path: Path) -> dic
             "trend": trend_unrealized,
             "hinweis": "kein Live-Kurs, daher keine Berechnung des unrealisierten Gewinns/Verlusts",
         },
+        "waehrungen": _currencies_by_recent_activity(records_by_bot),
+        "ohne_waehrung": {bot: _unknown_currency_count(records) for bot, records in records_by_bot.items()},
     }
 
 
@@ -465,21 +585,22 @@ def summarize_investment_activity(
     }
 
 
-def summarize_pnl_history(grid_path: Path, trend_path: Path) -> list[dict]:
-    """Realisierte PnL je Kalendertag (UTC) plus kumulierter Verlauf.
+def summarize_pnl_history(grid_path: Path, trend_path: Path) -> dict[str, list[dict]]:
+    """Realisierte PnL je Kalendertag (UTC) plus kumulierter Verlauf - je
+    Währung ein eigener Verlauf, nie über Währungen addiert.
 
     Stichtag ist der VERKAUF (sold_at / exit_time), nicht der Kauf - erst
     dort entsteht ein realisierter Gewinn oder Verlust.
 
-    Nur echte, geschlossene Positionen. DCA fehlt hier zwangsläufig: der
-    Bot verkauft nie und führt deshalb kein realized_pnl. Tage ohne
-    Abschluss bekommen keinen Eintrag - die Liste hat bewusst Lücken,
-    das Frontend interpoliert beim Zeichnen.
+    Nur echte, geschlossene Positionen mit bestimmbarer Währung. DCA fehlt
+    hier zwangsläufig: der Bot verkauft nie und führt deshalb kein
+    realized_pnl. Tage ohne Abschluss bekommen keinen Eintrag - die Liste
+    hat bewusst Lücken, das Frontend interpoliert beim Zeichnen.
     """
     grid_records, grid_error = _load_list(grid_path)
     trend_records, trend_error = _load_list(trend_path)
 
-    per_day: dict[date, float] = {}
+    per_day: dict[str, dict[date, float]] = {}
     for records, time_field in (
         ([] if grid_error else grid_records, "sold_at"),
         ([] if trend_error else trend_records, "exit_time"),
@@ -488,24 +609,29 @@ def summarize_pnl_history(grid_path: Path, trend_path: Path) -> list[dict]:
             if record.get("status") == "open" or record.get("dry_run") is not False:
                 continue
             pnl = _num(record.get("realized_pnl"), default=None)
-            if pnl is None:
+            currency = currency_of(record)
+            if pnl is None or currency is None:
                 continue
             day = _utc_date(record.get(time_field))
             if day is None:
                 continue
-            per_day[day] = per_day.get(day, 0.0) + pnl
+            days = per_day.setdefault(currency, {})
+            days[day] = days.get(day, 0.0) + pnl
 
-    verlauf = []
-    kumuliert = 0.0
-    for day in sorted(per_day):
-        kumuliert += per_day[day]
-        verlauf.append(
-            {
-                "datum": day.isoformat(),
-                "realisierte_pnl_an_diesem_tag": per_day[day],
-                "kumulierte_pnl_bis_zu_diesem_tag": kumuliert,
-            }
-        )
+    verlauf: dict[str, list[dict]] = {}
+    for currency, days in per_day.items():
+        kumuliert = 0.0
+        eintraege = []
+        for day in sorted(days):
+            kumuliert += days[day]
+            eintraege.append(
+                {
+                    "datum": day.isoformat(),
+                    "realisierte_pnl_an_diesem_tag": days[day],
+                    "kumulierte_pnl_bis_zu_diesem_tag": kumuliert,
+                }
+            )
+        verlauf[currency] = eintraege
     return verlauf
 
 

@@ -189,11 +189,11 @@ def _check_dca_buy_skipped_in_activity(body):
 def _check_grid_close_skipped_in_history(body):
     # Der Betrag zählt weiter ins Gesamtergebnis, nur der Verlauf kann
     # ihn keinem Tag zuordnen und lässt ihn aus.
-    assert body["overview"]["gesamtgewinn"] == pytest.approx(3.0)
-    assert body["pnl_verlauf"] == [
+    assert body["overview"]["gesamtgewinn"] == {"USDT": pytest.approx(3.0)}
+    assert body["pnl_verlauf"] == {"USDT": [
         {"datum": "2026-01-01", "realisierte_pnl_an_diesem_tag": 1.0,
          "kumulierte_pnl_bis_zu_diesem_tag": 1.0}
-    ]
+    ]}
 
 
 def _check_heartbeat_treated_as_no_success(body):

@@ -60,19 +60,108 @@ Endpunkte:
   bewusst **nicht** akzeptiert (siehe "Sicherheit").
   Antwort: je ein Block für `dca`, `grid`, `trend` und `allocator`, dazu
   `overview` (Gesamtgewinn/-verlust, unrealisierter Bestand) sowie die
-  beiden unten beschriebenen Felder `investment_activity` und
-  `pnl_verlauf`.
+  unten beschriebenen Felder `investment_activity`, `pnl_verlauf` und
+  `heartbeat`. Alle Geldbeträge kommen **je Währung** - siehe
+  „Währungen“.
 - `GET /api/export/trades` - CSV-Export aller ECHTEN Trades (`dry_run: false`)
   aus allen drei Bots, chronologisch sortiert, als Download
   (`Content-Disposition: attachment`). Gleiche Header-Authentifizierung wie
-  `/api/status`. Enthält am Ende einen `#`-Kommentarblock mit Hinweisen
-  (Beträge in USDT, keine Euro-Umrechnung, kein Steuerberatungs-Ersatz) -
-  gedacht als Rohdaten-Vorbereitung für einen Steuerberater, keine
-  fertige Steuerauswertung.
+  `/api/status`. Spalten: `datum_zeit_utc, bot, symbol, waehrung, seite,
+  menge_btc, preis, betrag, realisierter_pnl, position_id` - `symbol` und
+  `waehrung` stammen je Zeile aus dem Ledger-Eintrag. Am Ende steht ein
+  `#`-Kommentarblock, der **je vorkommender Währung** sagt, ob für die
+  Steuer eine Euro-Umrechnung nötig ist (EUR: nein; USDT/USDC: ja, die CSV
+  rechnet nicht um), dazu Exportzeitpunkt, Zeitraum und „keine
+  Steuerberatung“ - gedacht als Rohdaten-Vorbereitung für einen
+  Steuerberater, keine fertige Steuerauswertung.
+  **Achtung, geänderte Spaltennamen (29.09.2026):** Bis dahin hießen die
+  Betragsspalten `preis_usdt`, `betrag_usdt` und `realisierter_pnl_usdt`,
+  eine Spalte `waehrung` gab es nicht. Excel-Vorlagen oder Formeln, die
+  sich auf die alten Namen oder Spaltenpositionen beziehen, müssen
+  angepasst werden.
   Optionaler Parameter `?period=week|month|year|all` (Default `all`)
   filtert nach Kauf- bzw. Verkaufs-Zeitpunkt der jeweiligen Zeile - eine
   Position, die vor dem Zeitraum eröffnet und erst darin verkauft wurde,
   zeigt dann nur die Verkaufs-Zeile. Ein ungültiger Wert liefert `400`.
+
+### Währungen - nie über Währungsgrenzen addiert
+
+Binance hat für Kunden im EWR die USDT-Spot-Paare entfernt; für echtes
+Geld wechselt der Bot von BTCUSDT auf BTCEUR. Danach stehen in denselben
+Ledgern Beträge in zwei Währungen. Eine Summe über beide wäre eine Zahl
+in keiner Währung - und sähe trotzdem plausibel aus, weil EUR und USD
+nahe beieinander liegen. Deshalb wird **jeder** Geldbetrag je Währung
+geführt (`app/currency.py` ist die einzige Stelle mit der Regel).
+
+**Welche Währung hat ein Eintrag?**
+
+| Feld `symbol` im Ledger | Ergebnis |
+|---|---|
+| fehlt oder `null` | `BTCUSDT` → USDT (Altbestand, siehe unten) |
+| `BTCUSDT` / `BTCUSDC` / `BTCEUR` (Leerraum am Rand egal) | USDT / USDC / EUR |
+| alles andere (leer, Zahl, `ETHEUR`, `BTCXYZ`, ...) | **unbestimmbar** |
+
+- **Altbestand = BTCUSDT.** Grid- und Trend-Einträge tragen erst seit der
+  „Symbolbindung“ im crypto-bot (Commits `e2a37bd`-`9ef7d60`, deployt mit
+  Stand `980f3c3` am 29.09.2026) ein eigenes `symbol`; ältere Einträge
+  werden nicht nachträglich gestempelt. Der Bot liest fehlendes und
+  `null`-Feld als BTCUSDT (Entscheidung E1, `symbol_guard.effective_symbol`)
+  - diese App übernimmt **exakt dieselbe Regel**, damit beide Repos
+  Altbestände identisch einordnen. DCA-Einträge hatten `symbol` schon immer.
+- **Nur BTC als Basis, nur USDT/USDC/EUR als Quote.** Mengen werden in BTC
+  angezeigt; ein anderes Paar trüge seine Menge sonst still in die
+  BTC-Summen. Eine weitere Quote nachzutragen ist eine Zeile in `QUOTES`.
+- **Sicherheitsnetz.** Ein echter Eintrag mit unbestimmbarer Währung fließt
+  in **keine** Summe ein - weder als USDT noch als EUR -, bleibt aber in
+  den Positionslisten sichtbar und wird gezählt (`unknown_currency` je
+  Karte, `ohne_waehrung` in `overview`). Das Frontend zeigt dann eine
+  Amber-Zeile im Ergebnis-Block und in der Karten-Fußzeile; der Export
+  behält die Zeile (leere `waehrung`) und warnt im Kommentarblock. Beim Bot
+  verhindert eine Startprüfung, dass ein fremdes Paar überhaupt ins Ledger
+  kommt - der Fall ist also eine Anomalie, aber dann soll er auffallen.
+
+**Abhängigkeit zum Bot-Repo:** Die Regel oben setzt voraus, dass der Bot
+`symbol` in jeden neuen Grid-/Trend-Eintrag schreibt und alte Einträge
+unangetastet lässt (beides seit der Symbolbindung der Fall). Ändert sich
+dort die Leseregel für Altbestand, muss `currency.py` mitziehen.
+
+**API-Struktur (Beispiel nach einem Wechsel):**
+
+```jsonc
+"overview": {
+  "gesamtgewinn":  {"EUR": 1.2, "USDT": 5.0},   // immer dieselben Schlüssel
+  "gesamtverlust": {"EUR": -3.0, "USDT": 0.0},  // wie gesamtgewinn
+  "unrealisiert_geschätzt": {
+    "dca":  {"EUR": {"quantity": 0.0002, "avg_price": 65000.0},
+             "USDT": {"quantity": 0.0002, "avg_price": 75000.0}},
+    "grid": {},       // gültige Datei, kein offener Bestand
+    "trend": null,    // Datei fehlt/kaputt
+    "hinweis": "..."
+  },
+  "waehrungen": ["EUR", "USDT"],    // jüngste echte Aktivität zuerst
+  "ohne_waehrung": {"dca": 0, "grid": 0, "trend": 0}
+}
+```
+
+- Karten-Metriken: `dca.metrics.total_spent` und `avg_entry_price` sowie
+  `grid`/`trend.metrics.realized_pnl` sind Dicts `{währung: wert}`; leer
+  (`{}`), wenn es nichts zu summieren gibt. `total_quantity` (BTC) bleibt
+  eine Zahl. Jede Position in `open_positions` trägt `symbol` und
+  `waehrung` (`null` = unbestimmbar).
+- „Noch nichts realisiert“ ist ein leeres `gesamtgewinn`, nicht `0` - eine
+  Währung mit einem Abschluss bei PnL genau 0 steht mit `0.0` darin.
+
+**Anzeige.** Mit nur einer Währung - dem Normalfall - sieht das Dashboard
+aus wie vorher; die Einheit kommt aus den Daten statt fest „USDT“ zu sein.
+Bei mehreren Währungen bekommt die **Hauptwährung** (`waehrungen[0]`) die
+große Netto-Zahl, die Aufschlüsselung und das Diagramm; ältere Ergebnisse
+stehen klein darunter („zusätzlich +4,00 USDT aus der Zeit vor dem
+Wechsel“). Hat die Hauptwährung noch kein Ergebnis, steht groß „Noch kein
+realisiertes Ergebnis in EUR“. Das Diagramm zeigt nur die Hauptwährung:
+Grün/Rot trägt dort schon die Bedeutung Plus/Minus, eine zweite Linie
+bräuchte eine weitere Farbe, und zwei Einheiten auf einer Achse sähen
+vergleichbar aus, ohne es zu sein. Karten zeigen je Währung eine Zeile,
+Positionszeilen bekommen bei mehreren Währungen die Einheit angehängt.
 
 ### `investment_activity` - an wie vielen Tagen wurde überhaupt investiert?
 
@@ -117,12 +206,17 @@ Tag gar nichts. Diese Tage sind sonst nirgends sichtbar.
 ### `pnl_verlauf` - realisierte PnL über die Zeit
 
 ```json
-"pnl_verlauf": [
-  {"datum": "2026-09-07", "realisierte_pnl_an_diesem_tag": 2.4, "kumulierte_pnl_bis_zu_diesem_tag": 2.4},
-  {"datum": "2026-09-10", "realisierte_pnl_an_diesem_tag": 1.1, "kumulierte_pnl_bis_zu_diesem_tag": 3.5}
-]
+"pnl_verlauf": {
+  "USDT": [
+    {"datum": "2026-09-07", "realisierte_pnl_an_diesem_tag": 2.4, "kumulierte_pnl_bis_zu_diesem_tag": 2.4},
+    {"datum": "2026-09-10", "realisierte_pnl_an_diesem_tag": 1.1, "kumulierte_pnl_bis_zu_diesem_tag": 3.5}
+  ]
+}
 ```
 
+- **Je Währung ein eigener Verlauf** mit eigener Kumulation (siehe
+  „Währungen“) - zwei Abschlüsse am selben Tag in USDT und EUR landen in
+  zwei Listen, nicht in einer Tagessumme.
 - Gruppiert nach **Verkaufs-/Ausstiegstag** (`sold_at` bzw. `exit_time`,
   UTC) - erst dort entsteht ein realisierter Gewinn oder Verlust.
 - Nur echte (`dry_run: false`), geschlossene Grid- und Trend-Positionen.
@@ -131,7 +225,7 @@ Tag gar nichts. Diese Tage sind sonst nirgends sichtbar.
 - Tage ohne Abschluss bekommen **keinen** Eintrag; die Liste hat bewusst
   Lücken. Das Frontend zeichnet deshalb eine Stufenkurve - die kumulierte
   Summe ändert sich nur an Abschlusstagen und bleibt dazwischen konstant.
-- Leere Liste, solange nichts Echtes abgeschlossen wurde.
+- Leeres Objekt `{}`, solange nichts Echtes abgeschlossen wurde.
 
 ### `heartbeat` - läuft der jeweilige Bot-Prozess noch?
 
@@ -208,7 +302,17 @@ pytest                      # führt die Browser-Tests jetzt mit aus
   sichtbar, „+1"-Regel, nach dem Aufklappen jede Position auf der Seite)
   und das Offenbleiben einer aufgeklappten Liste beim Refresh. Das
   Netto-Ergebnis wird nur im Frontend berechnet, diese Tests sind seine
-  einzige Absicherung.
+  einzige Absicherung. Die Ergebnis-Tests laufen je einmal mit Altbestand
+  (USDT) und mit BTCEUR, damit ein fest eingetragenes „USDT“ auffällt;
+  dazu kommen die Mehrwährungsfälle: reiner EUR-Ledger ohne jedes „USDT“
+  auf der Seite, gemischte Währungen (nie addiert, Hauptwährung groß),
+  neue Währung ohne Ergebnis und die Amber-Meldung für Einträge ohne
+  bestimmbare Währung.
+
+Die Währungsregel selbst und die Summen je Währung (gemischter Ledger aus
+dem Audit, reiner EUR-Ledger, Sicherheitsnetz, Altbestand mit fehlendem,
+`null`- und explizitem Symbol) prüft `tests/test_currency.py`, den Export
+je Währung `tests/test_export.py`.
 
 Beide steuern einen echten Browser gegen einen echten uvicorn-Prozess
 (Fixtures in `tests/conftest.py`) - Sichtbarkeit hängt an CSS und ist in
