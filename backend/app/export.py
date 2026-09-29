@@ -8,11 +8,12 @@ wäre für eine Steuererklärung grundlegend falsch, deshalb werden sie hier
 komplett ausgeschlossen statt nur markiert - dieselbe Regel wie bei den
 gesamtgewinn/gesamtverlust-Kennzahlen in ledger_readers.py.
 
-Grid und Trend führen in ihrem Ledger kein eigenes 'symbol'-Feld (nur der
-DCA-Ledger hat eins) - das Symbol ist Konfiguration des jeweiligen Bots,
-nicht Teil des Eintrags (siehe dca_bot/audit_positions.py, das dafür
-GRID_SYMBOL/TREND_SYMBOL mit Default BTCUSDT aus der Umgebung liest).
-Für den Export wird deshalb derselbe Standardwert verwendet.
+Symbol und Währung kommen je Zeile aus dem Ledger-Eintrag (currency.resolve,
+dieselbe Regel wie im Dashboard). Die Betragsspalten tragen deshalb keine
+Währung mehr im Namen, die steht in der Spalte `waehrung`. Ein Eintrag
+mit unbestimmbarer Währung bleibt als Zeile erhalten - ein weggelassener
+echter Trade wäre für die Steuer schlimmer - mit leerer `waehrung` und
+einem Warnhinweis im Kommentarblock.
 """
 
 from __future__ import annotations
@@ -23,9 +24,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .currency import QUOTES, resolve
 from .ledger_readers import _load_list, _num
-
-DEFAULT_SYMBOL = "BTCUSDT"
 
 VALID_PERIODS = ("all", "week", "month", "year")
 
@@ -33,13 +33,16 @@ CSV_HEADER = [
     "datum_zeit_utc",
     "bot",
     "symbol",
+    "waehrung",
     "seite",
     "menge_btc",
-    "preis_usdt",
-    "betrag_usdt",
-    "realisierter_pnl_usdt",
+    "preis",
+    "betrag",
+    "realisierter_pnl",
     "position_id",
 ]
+
+_WAEHRUNG = CSV_HEADER.index("waehrung")
 
 
 def _dca_rows(records: list[dict]) -> list[list[Any]]:
@@ -51,7 +54,7 @@ def _dca_rows(records: list[dict]) -> list[list[Any]]:
             [
                 r.get("timestamp"),
                 "dca",
-                r.get("symbol", DEFAULT_SYMBOL),
+                *resolve(r),
                 "BUY",
                 r.get("quantity"),
                 r.get("price"),
@@ -83,12 +86,16 @@ def _round_trip_rows(
         quantity = r.get("quantity")
         quote_spent = _num(r.get("quote_spent"), default=None)
         position_id = r.get("id")
+        # Kauf und Verkauf einer Position laufen über dasselbe Paar - der
+        # Bot verkauft eine Position nur über ihr eigenes Symbol.
+        symbol, currency = resolve(r)
 
         rows.append(
             [
                 r.get(buy_time_field),
                 bot,
-                DEFAULT_SYMBOL,
+                symbol,
+                currency,
                 "BUY",
                 quantity,
                 r.get(buy_price_field),
@@ -112,7 +119,8 @@ def _round_trip_rows(
             [
                 r.get(sell_time_field),
                 bot,
-                DEFAULT_SYMBOL,
+                symbol,
+                currency,
                 "SELL",
                 quantity,
                 r.get(sell_price_field),
@@ -222,12 +230,41 @@ def _period_comment(period: str, start: datetime | None, end: datetime, now: dat
     )
 
 
-def _comment_block(period: str, start: datetime | None, end: datetime, now: datetime) -> str:
+def _currency_comments(rows: list[list[Any]]) -> list[str]:
+    """Je Währung, die in den exportierten Zeilen vorkommt, ein Hinweis,
+    ob für die Steuer eine Umrechnung in Euro nötig ist - statt eines
+    pauschalen "alles in USDT", der für EUR-Zeilen falsch wäre."""
+    if not rows:
+        return ["# Keine Trades im gewählten Zeitraum."]
+
+    lines = ["# Die Spalte waehrung nennt je Zeile die Währung von preis, betrag und realisierter_pnl."]
+    for currency in sorted({row[_WAEHRUNG] for row in rows if row[_WAEHRUNG] is not None}):
+        name, needs_conversion = QUOTES[currency]
+        if needs_conversion:
+            lines.append(
+                f"# {currency} ({name}): NICHT in Euro - für eine steuerliche Bewertung ist der "
+                "Euro-Gegenwert zum jeweiligen Transaktionszeitpunkt erforderlich, diese CSV enthält "
+                "dafür KEINE Währungsumrechnung."
+            )
+        else:
+            lines.append(f"# {currency} ({name}): Beträge bereits in Euro - keine Umrechnung nötig.")
+
+    unknown = sum(1 for row in rows if row[_WAEHRUNG] is None)
+    if unknown:
+        lines.append(
+            f"# ACHTUNG: {unknown} {'Zeile' if unknown == 1 else 'Zeilen'} ohne bestimmbare Währung "
+            "(Spalte waehrung leer) - bitte manuell prüfen."
+        )
+    return lines
+
+
+def _comment_block(
+    rows: list[list[Any]], period: str, start: datetime | None, end: datetime, now: datetime
+) -> str:
     generated_at = now.strftime("%Y-%m-%d %H:%M UTC")
     return "\n".join(
         [
-            "# HINWEIS: Alle Preise/Beträge in USDT (US-Dollar-Stablecoin), NICHT in Euro.",
-            "# Für eine steuerliche Bewertung ist der Euro-Gegenwert zum jeweiligen Transaktionszeitpunkt erforderlich - diese CSV enthält KEINE Währungsumrechnung.",
+            *_currency_comments(rows),
             f"# Export erstellt am: {generated_at}, Datenquelle: Homeserver-Ledger, nur echte Trades (dry_run: false).",
             _period_comment(period, start, end, now),
             "# Dies ist keine Steuerberatung, nur eine Rohdatenaufbereitung.",
@@ -265,4 +302,4 @@ def build_trades_csv(
     writer.writerow(CSV_HEADER)
     writer.writerows(rows)
 
-    return buffer.getvalue() + "\n" + _comment_block(period, start, end, now) + "\n"
+    return buffer.getvalue() + "\n" + _comment_block(rows, period, start, end, now) + "\n"

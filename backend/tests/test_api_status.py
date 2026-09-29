@@ -53,9 +53,12 @@ def test_status_aggregates_all_four_bots(tmp_path, monkeypatch):
     assert body["trend"]["status"] == "ok"
     assert body["allocator"]["status"] == "ok"
     assert body["allocator"]["trend_fraction"] == 0.5
-    assert body["overview"]["gesamtgewinn"] == 0.0
-    assert body["overview"]["gesamtverlust"] == 0.0
-    assert body["overview"]["unrealisiert_geschätzt"]["dca"] == {"quantity": 1.0, "avg_price": 10.0}
+    assert body["overview"]["gesamtgewinn"] == {}
+    assert body["overview"]["gesamtverlust"] == {}
+    assert body["overview"]["unrealisiert_geschätzt"]["dca"] == {"USDT": {"quantity": 1.0, "avg_price": 10.0}}
+    assert body["overview"]["waehrungen"] == ["USDT"]
+    assert body["overview"]["ohne_waehrung"] == {"dca": 0, "grid": 0, "trend": 0}
+    assert body["pnl_verlauf"] == {}
 
 
 def test_status_reports_no_data_per_bot_without_failing_others(tmp_path, monkeypatch):
@@ -81,4 +84,4 @@ def test_status_reports_no_data_per_bot_without_failing_others(tmp_path, monkeyp
     unrealized = body["overview"]["unrealisiert_geschätzt"]
     assert unrealized["dca"] is None
     assert unrealized["trend"] is None
-    assert unrealized["grid"] == {"quantity": 0.0, "avg_price": None}
+    assert unrealized["grid"] == {}

@@ -122,6 +122,40 @@
     return `${(value * 100).toFixed(1)}%`;
   }
 
+  // --- Währungen -----------------------------------------------------------
+  // Beträge kommen je Währung ({"USDT": 5, "EUR": -3}) und werden hier NIE
+  // addiert. `waehrungen` ist die Reihenfolge aus der API (jüngste echte
+  // Aktivität zuerst); die erste ist die Hauptwährung. Mit nur einer
+  // Währung sieht jede Anzeige aus wie vor der Umstellung - nur dass die
+  // Einheit aus den Daten kommt statt fest "USDT" zu sein.
+  let waehrungen = [];
+
+  function hauptwaehrung() {
+    return waehrungen[0] || null;
+  }
+
+  function mehrereWaehrungen() {
+    return waehrungen.length > 1;
+  }
+
+  // Schlüssel eines Währungs-Dicts in API-Reihenfolge, übrige alphabetisch.
+  function inReihenfolge(map) {
+    const keys = Object.keys(map || {});
+    return [...waehrungen.filter((w) => keys.includes(w)), ...keys.filter((k) => !waehrungen.includes(k)).sort()];
+  }
+
+  function mitEinheit(text, waehrung) {
+    return waehrung ? `${text} ${waehrung}` : text;
+  }
+
+  // Preis in einer Positionszeile: bei nur einer Währung wie bisher ohne
+  // Einheit - bei mehreren mit, sonst sähen zwei Zeilen in verschiedenen
+  // Währungen vergleichbar aus.
+  function zeilenPreis(value, waehrung) {
+    if (!waehrung) return `${fmtPrice(value)} (Währung unbekannt)`;
+    return mehrereWaehrungen() ? `${fmtPrice(value)} ${waehrung}` : fmtPrice(value);
+  }
+
   // Eine Kaskade für beide Zeitangaben auf der Karte, damit "Letzte
   // Aktivität" und der Heartbeat identisch formulieren.
   function fmtRelativeSeconds(seconds) {
@@ -152,6 +186,24 @@
     const wrap = el("div", "metric");
     wrap.appendChild(el("div", "field-label", label));
     wrap.appendChild(el("div", `value${cls ? " " + cls : ""}`, value));
+    return wrap;
+  }
+
+  // Eine Kennzahl mit einem Betrag je Währung, jeder in eigener Zeile.
+  // Leer: `leer` mit der Hauptwährung ("– USDT" wie früher bei null).
+  // `einheit: false` lässt die Einheit weg, solange es nur eine Währung
+  // gibt (Ø Einstieg stand schon immer ohne).
+  function metricBetraege(label, map, { leer, farbig = false, einheit = true }) {
+    const keys = inReihenfolge(map);
+    if (!keys.length) return metric(label, mitEinheit(leer, einheit ? hauptwaehrung() : null));
+
+    const wrap = el("div", "metric");
+    wrap.appendChild(el("div", "field-label", label));
+    for (const w of keys) {
+      const text = einheit || mehrereWaehrungen() ? `${fmtPrice(map[w])} ${w}` : fmtPrice(map[w]);
+      const cls = farbig ? pnlClass(map[w]) : "";
+      wrap.appendChild(el("div", `value${cls ? " " + cls : ""}`, text));
+    }
     return wrap;
   }
 
@@ -229,6 +281,13 @@
       teile.push(pulsTeil);
     }
 
+    // Sicherheitsnetz: echte Einträge, deren Währung sich nicht bestimmen
+    // ließ, fehlen in jeder Summe dieser Karte - das muss hier stehen.
+    const ohneWaehrung = data.metrics ? data.metrics.unknown_currency : 0;
+    if (ohneWaehrung > 0) {
+      teile.push(el("span", "warn", `⚠ ${eintraegeOhneWaehrung(ohneWaehrung)}`));
+    }
+
     if (!teile.length) return null;
     const footer = el("div", "card-footer");
     teile.forEach((teil, i) => {
@@ -236,6 +295,10 @@
       footer.appendChild(teil);
     });
     return footer;
+  }
+
+  function eintraegeOhneWaehrung(n) {
+    return `${n} ${n === 1 ? "Eintrag" : "Einträge"} ohne bestimmbare Währung, in keiner Summe enthalten`;
   }
 
   function buildCard(title, data, renderBody, heartbeat) {
@@ -313,9 +376,9 @@
       metrics.appendChild(metric("Käufe (echt)", String(data.metrics.real_trades)));
       metrics.appendChild(metric("Dry-Run", String(data.metrics.dry_run_trades)));
       metrics.appendChild(metric("Menge gesamt", fmtQty(data.metrics.total_quantity)));
-      metrics.appendChild(metric("Eingesetzt", `${fmtPrice(data.metrics.total_spent)} USDT`));
-      if (data.metrics.avg_entry_price !== null) {
-        metrics.appendChild(metric("Ø Einstieg", fmtPrice(data.metrics.avg_entry_price)));
+      metrics.appendChild(metricBetraege("Eingesetzt", data.metrics.total_spent, { leer: fmtPrice(0) }));
+      if (Object.keys(data.metrics.avg_entry_price || {}).length) {
+        metrics.appendChild(metricBetraege("Ø Einstieg", data.metrics.avg_entry_price, { einheit: false }));
       }
       card.appendChild(metrics);
 
@@ -324,7 +387,13 @@
         // gekürzt - ältere verschwanden ohne jeden Hinweis.
         const zeilen = [...data.open_positions]
           .reverse()
-          .map((p) => buildPositionRow([p.symbol, `${fmtPrice(p.price)} USDT`, fmtQty(p.quantity)]));
+          .map((p) =>
+            buildPositionRow([
+              p.symbol,
+              p.waehrung ? `${fmtPrice(p.price)} ${p.waehrung}` : `${fmtPrice(p.price)} (Währung unbekannt)`,
+              fmtQty(p.quantity),
+            ])
+          );
         card.appendChild(positionList("dca", zeilen));
       }
     }, heartbeat);
@@ -336,7 +405,7 @@
       metrics.appendChild(metric("Offen", String(data.metrics.open_positions)));
       metrics.appendChild(metric("Geschlossen", String(data.metrics.closed_positions)));
       metrics.appendChild(
-        metric("Realisiert", `${fmtPrice(data.metrics.realized_pnl)} USDT`, pnlClass(data.metrics.realized_pnl))
+        metricBetraege("Realisiert", data.metrics.realized_pnl, { leer: fmtPrice(null), farbig: true })
       );
       card.appendChild(metrics);
 
@@ -344,8 +413,8 @@
         const zeilen = data.open_positions.map((p) => {
           const row = buildPositionRow([
             `Stufe ${p.level_index}`,
-            `Kauf ${fmtPrice(p.buy_price)}`,
-            `Ziel ${fmtPrice(p.target_sell_price)}`,
+            `Kauf ${zeilenPreis(p.buy_price, p.waehrung)}`,
+            `Ziel ${zeilenPreis(p.target_sell_price, p.waehrung)}`,
           ]);
           if (p.dry_run) {
             row.appendChild(el("span", "dry-run-tag", "DRY-RUN"));
@@ -363,14 +432,14 @@
       metrics.appendChild(metric("Offen", String(data.metrics.open_trades)));
       metrics.appendChild(metric("Geschlossen", String(data.metrics.closed_trades)));
       metrics.appendChild(
-        metric("Realisiert", `${fmtPrice(data.metrics.realized_pnl)} USDT`, pnlClass(data.metrics.realized_pnl))
+        metricBetraege("Realisiert", data.metrics.realized_pnl, { leer: fmtPrice(null), farbig: true })
       );
       card.appendChild(metrics);
 
       if (data.open_positions.length) {
         const zeilen = data.open_positions.map((p) => {
           const row = buildPositionRow([
-            `Einstieg ${fmtPrice(p.entry_price)}`,
+            `Einstieg ${zeilenPreis(p.entry_price, p.waehrung)}`,
             `Menge ${fmtQty(p.quantity)}`,
             p.stop_loss_order_id ? "SL gesetzt" : "kein SL",
           ]);
@@ -401,32 +470,55 @@
 
   const BOT_LABELS = { dca: "DCA", grid: "Grid", trend: "Trend" };
 
-  function unrealizedRowText(entry) {
-    if (entry === null || entry === undefined) return "keine Daten";
-    if (!entry.quantity) return "keine offene Position";
-    const qty = fmtQty(entry.quantity);
-    if (entry.avg_price === null || entry.avg_price === undefined) {
-      return `${qty} BTC · Einstandspreis unbekannt`;
-    }
-    return `${qty} BTC zu Ø ${fmtPrice(entry.avg_price)} USDT Einstandspreis`;
+  // Eine Zeile je Währung; bei nur einer Währung genau der frühere Text.
+  function unrealizedLines(entry) {
+    if (entry === null || entry === undefined) return ["keine Daten"];
+    const lines = inReihenfolge(entry)
+      .filter((w) => entry[w].quantity)
+      .map((w) => {
+        const qty = fmtQty(entry[w].quantity);
+        if (entry[w].avg_price === null || entry[w].avg_price === undefined) {
+          return `${qty} BTC · Einstandspreis unbekannt`;
+        }
+        return `${qty} BTC zu Ø ${fmtPrice(entry[w].avg_price)} ${w} Einstandspreis`;
+      });
+    return lines.length ? lines : ["keine offene Position"];
+  }
+
+  // "+3,15 EUR", "−1,20 USDT" - und "±0,00 EUR", wenn die Ziffern Null zeigen.
+  function fmtNetto(value, waehrung) {
+    return displayedSign(value) === 0 ? `±${fmtPrice(0)} ${waehrung}` : fmtSigned(value, waehrung);
   }
 
   // Die Kernaussage der Seite: eine Zahl, die niemand mehr im Kopf
   // ausrechnen muss. Bewusst "realisiert" und nicht "gesamt" - der
   // DCA-Bestand fließt nicht ein, ein "Gesamtergebnis" würde also mehr
   // behaupten, als die Zahl enthält.
-  function renderHero(overview, verlauf) {
+  //
+  // Gibt es mehrere Währungen (nach einem Paarwechsel), bekommt nur die
+  // Hauptwährung - die mit der jüngsten Aktivität - die große Zahl und das
+  // Diagramm. Ältere Ergebnisse stehen klein darunter, eigenständig: USDT
+  // und EUR zu einer Zahl zu addieren wäre schlicht falsch.
+  function renderHero(overview, verlaeufe) {
     const block = els.heroBlock;
     block.innerHTML = "";
     block.appendChild(el("div", "field-label", "Realisiertes Ergebnis"));
+    renderHeroInhalt(block, overview, verlaeufe || {});
 
-    const gewinn = overview.gesamtgewinn;
-    const verlust = overview.gesamtverlust;
-    const hatVerlauf = Array.isArray(verlauf) && verlauf.length > 0;
+    const ohne = Object.values(overview.ohne_waehrung || {}).reduce((a, b) => a + (b || 0), 0);
+    if (ohne > 0) {
+      block.appendChild(el("div", "hero-meta warn", `⚠ ${eintraegeOhneWaehrung(ohne)}`));
+    }
+  }
+
+  function renderHeroInhalt(block, overview, verlaeufe) {
+    const gewinne = overview.gesamtgewinn || {};
+    const verluste = overview.gesamtverlust || {};
+    const realisiert = inReihenfolge(gewinne);
 
     // "Noch nie gehandelt" ist etwas anderes als "genau ausgeglichen" -
     // eine große 0,00 würde das Erste als das Zweite ausgeben.
-    if (!hatVerlauf && gewinn === 0 && verlust === 0) {
+    if (!realisiert.length) {
       block.appendChild(el("div", "hero-empty", "Noch kein realisiertes Ergebnis"));
       block.appendChild(
         el(
@@ -438,34 +530,45 @@
       return;
     }
 
-    // Farbe und "±0,00" folgen derselben Rundung wie die Ziffern (siehe displayedSign).
-    const netto = gewinn + verlust;
-    const vorzeichen = displayedSign(netto);
-    const richtung = vorzeichen > 0 ? " pos" : vorzeichen < 0 ? " neg" : "";
-    block.appendChild(
-      el("div", `value hero-value${richtung}`, vorzeichen === 0 ? "±0,00 USDT" : fmtSigned(netto))
-    );
+    const haupt = hauptwaehrung() || realisiert[0];
 
-    // Nur die Netto-Zahl trägt Farbe; die Aufschlüsselung bleibt grau.
-    block.appendChild(
-      el(
-        "div",
-        "hero-breakdown",
-        `Gewinn ${fmtSignedPlain(gewinn)} · Verlust ${fmtSignedPlain(verlust)} USDT`
-      )
-    );
+    if (realisiert.includes(haupt)) {
+      const gewinn = gewinne[haupt];
+      const verlust = verluste[haupt] || 0;
+      // Farbe und "±0,00" folgen derselben Rundung wie die Ziffern (siehe displayedSign).
+      const netto = gewinn + verlust;
+      const vorzeichen = displayedSign(netto);
+      const richtung = vorzeichen > 0 ? " pos" : vorzeichen < 0 ? " neg" : "";
+      block.appendChild(el("div", `value hero-value${richtung}`, fmtNetto(netto, haupt)));
 
-    if (!hatVerlauf) return;
-
-    if (verlauf.length === 1) {
-      // Ein einzelner Punkt ist kein Verlauf - die Zahl steht schon oben.
+      // Nur die Netto-Zahl trägt Farbe; die Aufschlüsselung bleibt grau.
       block.appendChild(
-        el("div", "hero-meta", `Bisher ein einziger Abschlusstag: ${fmtShortDate(verlauf[0].datum)}`)
+        el(
+          "div",
+          "hero-breakdown",
+          `Gewinn ${fmtSignedPlain(gewinn)} · Verlust ${fmtSignedPlain(verlust)} ${haupt}`
+        )
       );
-      return;
+
+      const verlauf = verlaeufe[haupt] || [];
+      if (verlauf.length === 1) {
+        // Ein einzelner Punkt ist kein Verlauf - die Zahl steht schon oben.
+        block.appendChild(
+          el("div", "hero-meta", `Bisher ein einziger Abschlusstag: ${fmtShortDate(verlauf[0].datum)}`)
+        );
+      } else if (verlauf.length > 1) {
+        block.appendChild(buildPnlChart(verlauf, haupt));
+      }
+    } else {
+      // Direkt nach einem Paarwechsel: in der neuen Währung wurde noch
+      // nichts abgeschlossen. Groß steht das, nicht das alte Ergebnis.
+      block.appendChild(el("div", "hero-empty", `Noch kein realisiertes Ergebnis in ${haupt}`));
     }
 
-    block.appendChild(buildPnlChart(verlauf));
+    for (const w of realisiert.filter((w) => w !== haupt)) {
+      const netto = gewinne[w] + (verluste[w] || 0);
+      block.appendChild(el("div", "hero-meta", `zusätzlich ${fmtNetto(netto, w)} aus der Zeit vor dem Wechsel`));
+    }
   }
 
   function renderUnrealized(overview) {
@@ -477,7 +580,14 @@
     for (const key of ["dca", "grid", "trend"]) {
       const row = el("div", "unrealized-row");
       row.appendChild(el("span", "field-label", BOT_LABELS[key]));
-      row.appendChild(el("span", "", unrealizedRowText(unrealized[key])));
+      const lines = unrealizedLines(unrealized[key]);
+      if (lines.length === 1) {
+        row.appendChild(el("span", "", lines[0]));
+      } else {
+        const wert = el("span");
+        lines.forEach((line) => wert.appendChild(el("div", "", line)));
+        row.appendChild(wert);
+      }
       rows.appendChild(row);
     }
     els.unrealizedBlock.appendChild(rows);
@@ -528,15 +638,19 @@
     return `${sign < 0 ? "−" : "+"}${formatted}`;
   }
 
-  function fmtSigned(value) {
-    return `${fmtSignedPlain(value)} USDT`;
+  function fmtSigned(value, waehrung) {
+    return `${fmtSignedPlain(value)} ${waehrung}`;
   }
 
   function daysSinceEpoch(iso) {
     return Date.parse(`${iso}T00:00:00Z`) / 86400000;
   }
 
-  function buildPnlChart(verlauf) {
+  // Nur EINE Währung je Diagramm. Die Linienfarbe trägt schon Bedeutung
+  // (grün über, rot unter der Null) - eine zweite Linie ließe sich nur über
+  // eine weitere Farbe unterscheiden, und zwei Einheiten auf einer Achse
+  // sähen vergleichbar aus, ohne es zu sein.
+  function buildPnlChart(verlauf, waehrung) {
     // Geometrie: der Platz für die Achsenbeschriftung ist eingeplant, damit
     // die Karte nicht scrollen muss.
     const W = 340;
@@ -579,7 +693,8 @@
       viewBox: `0 0 ${W} ${H}`,
       role: "img",
       "aria-label": `Kumulierter realisierter Gewinn/Verlust, zuletzt ${fmtSigned(
-        points[points.length - 1].y
+        points[points.length - 1].y,
+        waehrung
       )}`,
     });
 
@@ -765,6 +880,7 @@
   }
 
   function render(data) {
+    waehrungen = Array.isArray(data.overview.waehrungen) ? data.overview.waehrungen : [];
     renderHero(data.overview, data.pnl_verlauf);
     renderUnrealized(data.overview);
     renderActivity(data.investment_activity);
