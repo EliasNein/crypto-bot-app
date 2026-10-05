@@ -1,7 +1,9 @@
 # Trading Bot Dashboard
 
 Read-only, mobil-optimiertes Web-Dashboard zur Anzeige der Stats des
-Trading-Bots (DCA, Grid, Trend, Allocator).
+Trading-Bots (DCA, Grid, Trend, Allocator): aktuelle Positionen,
+Gesamtgewinn/-verlust, PnL-Verlauf, Lebenszeichen der Bot-Prozesse und
+Trade-Export für die Steuererklärung.
 
 **Isolationsprinzip:** Diese App ist ein komplett eigenständiges Projekt.
 Sie liest nur die vier Ledger-Dateien des Bots (`trade_ledger.json`,
@@ -11,15 +13,54 @@ Bot-Projekt, hat keinen Zugriff auf dessen `.env`/API-Keys und enthält
 keinerlei Binance-Anbindung. Ein Trade auszulösen ist mit diesem Code
 strukturell nicht möglich.
 
-## Struktur
+English version: [README.en.md](README.en.md)
 
-```
-backend/    FastAPI-App (Python) - liest die Ledger-Dateien, liefert JSON
-frontend/   Statisches HTML/CSS/JS ohne Build-Prozess
-data/       Beispiel-JSON-Dateien für die lokale Entwicklung
+## Bot-Projekt
+
+Die Trading-Bots selbst, die die hier angezeigten Ledger-Dateien
+schreiben, liegen in einem eigenen Repository:
+[crypto-dca-bot](https://github.com/EliasNein/crypto-dca-bot).
+
+Die App hängt nur am Dateiformat der Ledger, nicht am Code des Bots -
+wo eine Änderung dort hier nachgezogen werden muss, steht im jeweiligen
+Abschnitt (z.B. 6.2 „Abhängigkeit zum Bot-Repo“).
+
+## 1. Voraussetzungen
+
+- Python 3.10+
+- Für die Browser-Tests zusätzlich Playwright mit Chromium (siehe 10)
+- Für den Betrieb von außen: ein Cloudflare Tunnel (siehe 9)
+
+## 2. Installation
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # Linux/Mac
+pip install -r requirements.txt
 ```
 
-## Starten (Backend + Frontend in einem Prozess)
+Die Versionen in `requirements.txt` sind exakt gepinnt, damit der
+Homeserver dieselben Versionen bekommt wie lokal getestet.
+
+## 3. Konfiguration
+
+```bash
+copy .env.example .env        # Windows
+# cp .env.example .env        # Linux/Mac
+```
+
+| Variable | Pflicht | Bedeutung |
+|---|---|---|
+| `DASHBOARD_TOKEN` | ja | Geheimes Token, das das Frontend als Header `X-Dashboard-Token` mitschickt. Mindestens 32 Zeichen, keine Platzhalter - sonst verweigert der Server den Dienst (siehe 8). Erzeugen mit `openssl rand -hex 32`. |
+| `DATA_DIR` | nein | Ordner mit den Ledger-Dateien. Ohne Angabe liest das Backend aus `../data` (die mitgelieferten Beispieldateien). Für den echten Server: den `data/`-Ordner des Bots. |
+| `CORS_ORIGINS` | nein | Erlaubte Fremd-Origins, kommagetrennt. **Leer lassen** ist der Normalfall, weil Frontend und API von derselben Adresse kommen. |
+
+Statt in `.env` können alle drei auch als Umgebungsvariable gesetzt
+werden.
+
+## 4. Starten (Backend + Frontend in einem Prozess)
 
 Die FastAPI-Instanz liefert beides aus: die API-Endpunkte **und** das
 Frontend (`frontend/` ist unter `/` gemountet). Es wird also nur ein
@@ -28,19 +69,6 @@ statischen Dateien.
 
 ```bash
 cd backend
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # Linux/Mac
-pip install -r requirements.txt
-
-# Token setzen (Pflicht) - entweder als Umgebungsvariable oder in .env:
-copy .env.example .env        # Windows
-# cp .env.example .env        # Linux/Mac
-# dann DASHBOARD_TOKEN in .env auf einen eigenen Wert setzen:
-#   openssl rand -hex 32
-# Mindestens 32 Zeichen, keine Platzhalter - sonst verweigert der Server
-# den Dienst (siehe "Sicherheit").
-
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -49,20 +77,49 @@ Beim ersten Laden nach dem Token fragen lassen (das aus der `.env`); das
 Feld "Backend-URL" bleibt dabei **leer**, weil API und Frontend von
 derselben Adresse kommen.
 
-Ohne `DATA_DIR`-Angabe liest das Backend automatisch aus `../data`
-(die mitgelieferten Beispieldateien). Für den echten Server: `DATA_DIR`
-auf den `data/`-Ordner des Bots setzen.
+`--reload` ist nur fürs lokale Entwickeln gedacht, auf dem Server
+weglassen (siehe 9).
 
-Endpunkte:
+## 5. Projektstruktur
+
+```
+Trading-Bot-App/
+├── backend/
+│   ├── app/
+│   │   ├── main.py           # FastAPI-App: Endpunkte, Frontend-Mount, CORS
+│   │   ├── auth.py           # Token-Prüfung (Header, Mindest-Entropie, Zeitvergleich)
+│   │   ├── ledger_readers.py # Liest die Ledger, berechnet Karten, Übersicht, Verläufe
+│   │   ├── currency.py       # Währung je Eintrag + Summen je Währung (einzige Stelle der Regel)
+│   │   ├── export.py         # CSV-Export der echten Trades
+│   │   └── access_log.py     # Filtert Geheimnisse aus dem uvicorn-Access-Log
+│   ├── tests/                # pytest-Suite inkl. Browser-Tests (siehe 10)
+│   ├── requirements.txt      # Laufzeit-Abhängigkeiten (gepinnt)
+│   ├── requirements-dev.txt  # Zusätzlich: Playwright für die Browser-Tests
+│   ├── pytest.ini
+│   └── .env.example
+├── frontend/                 # Statisches HTML/CSS/JS ohne Build-Prozess
+│   ├── index.html
+│   ├── app.js
+│   ├── style.css
+│   ├── manifest.json         # PWA-light für "Zum Startbildschirm hinzufügen"
+│   └── icons/
+├── data/                     # Beispiel-JSON-Dateien für die lokale Entwicklung
+├── README.md
+└── README.en.md
+```
+
+## 6. API
+
+### 6.1 Endpunkte
+
 - `GET /health` - kein Token nötig, liefert `{"status": "ok"}`.
 - `GET /api/status` - Token per Header `X-Dashboard-Token: <token>`.
   Ohne/mit falschem Token: `401`. Ein `?token=`-Query-Parameter wird
-  bewusst **nicht** akzeptiert (siehe "Sicherheit").
+  bewusst **nicht** akzeptiert (siehe 8).
   Antwort: je ein Block für `dca`, `grid`, `trend` und `allocator`, dazu
   `overview` (Gesamtgewinn/-verlust, unrealisierter Bestand) sowie die
   unten beschriebenen Felder `investment_activity`, `pnl_verlauf` und
-  `heartbeat`. Alle Geldbeträge kommen **je Währung** - siehe
-  „Währungen“.
+  `heartbeat`. Alle Geldbeträge kommen **je Währung** - siehe 6.2.
 - `GET /api/export/trades` - CSV-Export aller ECHTEN Trades (`dry_run: false`)
   aus allen drei Bots, chronologisch sortiert, als Download
   (`Content-Disposition: attachment`). Gleiche Header-Authentifizierung wie
@@ -84,7 +141,7 @@ Endpunkte:
   Position, die vor dem Zeitraum eröffnet und erst darin verkauft wurde,
   zeigt dann nur die Verkaufs-Zeile. Ein ungültiger Wert liefert `400`.
 
-### Währungen - nie über Währungsgrenzen addiert
+### 6.2 Währungen - nie über Währungsgrenzen addiert
 
 Binance hat für Kunden im EWR die USDT-Spot-Paare entfernt; für echtes
 Geld wechselt der Bot von BTCUSDT auf BTCEUR. Danach stehen in denselben
@@ -163,7 +220,7 @@ bräuchte eine weitere Farbe, und zwei Einheiten auf einer Achse sähen
 vergleichbar aus, ohne es zu sein. Karten zeigen je Währung eine Zeile,
 Positionszeilen bekommen bei mehreren Währungen die Einheit angehängt.
 
-### `investment_activity` - an wie vielen Tagen wurde überhaupt investiert?
+### 6.3 `investment_activity` - an wie vielen Tagen wurde überhaupt investiert?
 
 Skaliert der Allocator den DCA-Betrag unter das Mindestvolumen und hat der
 Trend-Bot am selben Tag kein bestätigtes Signal, kauft das System an diesem
@@ -203,7 +260,7 @@ Tag gar nichts. Diese Tage sind sonst nirgends sichtbar.
 > ausdrücklich darauf hin; ohne diese Einschränkung ist die Zahl **kein
 > Fehlerbericht**.
 
-### `pnl_verlauf` - realisierte PnL über die Zeit
+### 6.4 `pnl_verlauf` - realisierte PnL über die Zeit
 
 ```json
 "pnl_verlauf": {
@@ -214,9 +271,9 @@ Tag gar nichts. Diese Tage sind sonst nirgends sichtbar.
 }
 ```
 
-- **Je Währung ein eigener Verlauf** mit eigener Kumulation (siehe
-  „Währungen“) - zwei Abschlüsse am selben Tag in USDT und EUR landen in
-  zwei Listen, nicht in einer Tagessumme.
+- **Je Währung ein eigener Verlauf** mit eigener Kumulation (siehe 6.2) -
+  zwei Abschlüsse am selben Tag in USDT und EUR landen in zwei Listen,
+  nicht in einer Tagessumme.
 - Gruppiert nach **Verkaufs-/Ausstiegstag** (`sold_at` bzw. `exit_time`,
   UTC) - erst dort entsteht ein realisierter Gewinn oder Verlust.
 - Nur echte (`dry_run: false`), geschlossene Grid- und Trend-Positionen.
@@ -227,7 +284,7 @@ Tag gar nichts. Diese Tage sind sonst nirgends sichtbar.
   Summe ändert sich nur an Abschlusstagen und bleibt dazwischen konstant.
 - Leeres Objekt `{}`, solange nichts Echtes abgeschlossen wurde.
 
-### `heartbeat` - läuft der jeweilige Bot-Prozess noch?
+### 6.5 `heartbeat` - läuft der jeweilige Bot-Prozess noch?
 
 Der Bot schreibt je Prozess eine Datei `heartbeat_{dca,grid,trend,allocator}.json`
 in dasselbe `DATA_DIR` wie die Ledger.
@@ -279,53 +336,10 @@ einen ganzen Tag lang der Normalzustand. Das Frontend benennt ihn
 sachlich („Noch kein erfolgreicher Zyklus seit Prozessstart"), statt eine
 Dauer zu behaupten, die es nicht gibt.
 
-### Tests
-
-```bash
-cd backend
-pytest
-```
-
-Zusätzlich gibt es Browser-Tests für das Frontend. Die brauchen
-Playwright und überspringen sich sonst automatisch:
-
-```bash
-pip install -r requirements-dev.txt
-python -m playwright install chromium
-pytest                      # führt die Browser-Tests jetzt mit aus
-```
-
-- `tests/test_frontend_login_flow.py` - Login-/Reload-Ablauf und
-  Login-Overlay.
-- `tests/test_frontend_dashboard.py` - Netto-Ergebnis (Summe, Rundung,
-  Farbe, „Noch kein realisiertes Ergebnis"), Positionslisten (drei
-  sichtbar, „+1"-Regel, nach dem Aufklappen jede Position auf der Seite)
-  und das Offenbleiben einer aufgeklappten Liste beim Refresh. Das
-  Netto-Ergebnis wird nur im Frontend berechnet, diese Tests sind seine
-  einzige Absicherung. Die Ergebnis-Tests laufen je einmal mit Altbestand
-  (USDT) und mit BTCEUR, damit ein fest eingetragenes „USDT“ auffällt;
-  dazu kommen die Mehrwährungsfälle: reiner EUR-Ledger ohne jedes „USDT“
-  auf der Seite, gemischte Währungen (nie addiert, Hauptwährung groß),
-  neue Währung ohne Ergebnis und die Amber-Meldung für Einträge ohne
-  bestimmbare Währung.
-
-Die Währungsregel selbst und die Summen je Währung (gemischter Ledger aus
-dem Audit, reiner EUR-Ledger, Sicherheitsnetz, Altbestand mit fehlendem,
-`null`- und explizitem Symbol) prüft `tests/test_currency.py`, den Export
-je Währung `tests/test_export.py`.
-
-Beide steuern einen echten Browser gegen einen echten uvicorn-Prozess
-(Fixtures in `tests/conftest.py`) - Sichtbarkeit hängt an CSS und ist in
-einem DOM-Stub nicht zuverlässig prüfbar. Die Dashboard-Tests fangen
-`/api/status` im Browser ab und liefern die Antwort, die das echte
-Backend für die Ledger-Daten des jeweiligen Tests erzeugt. So braucht
-nicht jeder Fall einen eigenen Server, und die Testdaten können nicht
-unbemerkt vom Backend abweichen.
-
-## Frontend
+## 7. Frontend
 
 Kein Build-Schritt, kein eigener Server - `frontend/` wird von der
-FastAPI-Instanz direkt mit ausgeliefert (siehe oben).
+FastAPI-Instanz direkt mit ausgeliefert (siehe 4).
 
 Token und (optionale) Backend-URL werden im LocalStorage des Browsers
 gespeichert; über das Zahnrad-Icon oben rechts lassen sie sich später
@@ -339,14 +353,14 @@ falschem Token oder nicht erreichbarem Backend eine klare Fehlermeldung.
 Der Button "Export für Steuerberater (CSV)" lädt `/api/export/trades`
 herunter (normaler Browser-Download, keine Vorschau im Frontend).
 
-### "Zum Startbildschirm hinzufügen" (Android)
+### 7.1 "Zum Startbildschirm hinzufügen" (Android)
 
 Die Seite bringt ein `manifest.json` mit (PWA-light, ohne Service Worker).
 Im mobilen Chrome über das Menü "Zum Startbildschirm hinzufügen" wählen,
 sobald das Dashboard über eine echte URL erreichbar ist (z.B. über den
 Cloudflare Tunnel).
 
-### Bekannte kleinere Verbesserungen
+### 7.2 Bekannte kleinere Verbesserungen
 
 Aus dem App-Check vom 26.09.2026, bewusst noch offen:
 
@@ -361,7 +375,7 @@ Aus dem App-Check vom 26.09.2026, bewusst noch offen:
 - **Kein `aria-live`** für Fehlerbanner, Login-Fehler und
   Verbindungsstatus - Änderungen werden Screenreadern nicht angesagt.
 
-## Sicherheit
+## 8. Sicherheit
 
 Was die App selbst durchsetzt:
 
@@ -394,7 +408,13 @@ Was die App selbst durchsetzt:
   schlimmstmögliche Ergebnis eines geleakten Tokens ist das *Lesen* der
   Ledger-Daten.
 
-## Später auf dem Homeserver
+Bekannte, bewusst offene Punkte: keine Security-Header (CSP etc.) - die
+lassen sich bei Bedarf in Cloudflare setzen; und Werte aus den
+Ledger-Dateien werden im CSV-Export nicht gegen Excel-Formeln
+entschärft (nicht über das Netz erreichbar, setzt Schreibzugriff auf den
+Homeserver voraus).
+
+## 9. Betrieb auf dem Homeserver
 
 1. Den einen Prozess mit echtem `DASHBOARD_TOKEN` und `DATA_DIR` (Pfad zum
    `data/`-Ordner des Bots) starten, z.B. via systemd-Service oder
@@ -416,8 +436,61 @@ Was die App selbst durchsetzt:
    Nur falls das Frontend bewusst von einer anderen Domain kommt, dort
    die konkrete URL eintragen.
 
-Bekannte, bewusst offene Punkte: keine Security-Header (CSP etc.) - die
-lassen sich bei Bedarf in Cloudflare setzen; und Werte aus den
-Ledger-Dateien werden im CSV-Export nicht gegen Excel-Formeln
-entschärft (nicht über das Netz erreichbar, setzt Schreibzugriff auf den
-Homeserver voraus).
+## 10. Tests
+
+```bash
+cd backend
+pytest
+```
+
+Zusätzlich gibt es Browser-Tests für das Frontend. Die brauchen
+Playwright und überspringen sich sonst automatisch:
+
+```bash
+pip install -r requirements-dev.txt
+python -m playwright install chromium
+pytest                      # führt die Browser-Tests jetzt mit aus
+```
+
+| Testdatei | Thema |
+|---|---|
+| `test_api_auth` | Token-Prüfung: Header, Mindest-Entropie, kein `?token=` |
+| `test_api_status`, `test_ledger_readers` | `/api/status` und die Auswertung der vier Ledger |
+| `test_corrupt_values` | Robustheit gegen falsche Feldtypen in gültigen JSON-Dateien |
+| `test_currency` | Währungsregel, Summen je Währung, Altbestand, Sicherheitsnetz |
+| `test_export`, `test_api_export` | CSV-Export je Währung, Zeitraum-Filter |
+| `test_investment_activity` | Kennzahl „Tage ohne Kauf“ |
+| `test_pnl_history` | PnL-Verlauf je Tag und kumuliert |
+| `test_heartbeats` | Heartbeat-Status der vier Bot-Prozesse |
+| `test_access_log` | Geheimnisse im Access-Log werden ersetzt |
+| `test_frontend_login_flow` | Browser: Login-/Reload-Ablauf und Login-Overlay |
+| `test_frontend_dashboard` | Browser: Ergebnis-Block und Positionslisten |
+
+Zu den Browser-Tests im Einzelnen:
+
+- `tests/test_frontend_login_flow.py` - Login-/Reload-Ablauf und
+  Login-Overlay.
+- `tests/test_frontend_dashboard.py` - Netto-Ergebnis (Summe, Rundung,
+  Farbe, „Noch kein realisiertes Ergebnis"), Positionslisten (drei
+  sichtbar, „+1"-Regel, nach dem Aufklappen jede Position auf der Seite)
+  und das Offenbleiben einer aufgeklappten Liste beim Refresh. Das
+  Netto-Ergebnis wird nur im Frontend berechnet, diese Tests sind seine
+  einzige Absicherung. Die Ergebnis-Tests laufen je einmal mit Altbestand
+  (USDT) und mit BTCEUR, damit ein fest eingetragenes „USDT“ auffällt;
+  dazu kommen die Mehrwährungsfälle: reiner EUR-Ledger ohne jedes „USDT“
+  auf der Seite, gemischte Währungen (nie addiert, Hauptwährung groß),
+  neue Währung ohne Ergebnis und die Amber-Meldung für Einträge ohne
+  bestimmbare Währung.
+
+Die Währungsregel selbst und die Summen je Währung (gemischter Ledger aus
+dem Audit, reiner EUR-Ledger, Sicherheitsnetz, Altbestand mit fehlendem,
+`null`- und explizitem Symbol) prüft `tests/test_currency.py`, den Export
+je Währung `tests/test_export.py`.
+
+Beide Browser-Testdateien steuern einen echten Browser gegen einen echten
+uvicorn-Prozess (Fixtures in `tests/conftest.py`) - Sichtbarkeit hängt an
+CSS und ist in einem DOM-Stub nicht zuverlässig prüfbar. Die
+Dashboard-Tests fangen `/api/status` im Browser ab und liefern die
+Antwort, die das echte Backend für die Ledger-Daten des jeweiligen Tests
+erzeugt. So braucht nicht jeder Fall einen eigenen Server, und die
+Testdaten können nicht unbemerkt vom Backend abweichen.
